@@ -15,7 +15,9 @@
 #include <linux/slab.h>
 #include <uapi/asm-generic/ioctl.h>
 #include <linux/rbtree.h>
-
+#include <linux/rwsem.h>
+#include <linux/completion.h>
+#include <linux/thread_info.h>
 
 MODULE_LICENSE("GPL");
 
@@ -38,13 +40,16 @@ struct communique {
 	struct file_operations fops;
 	struct device *device;
 	struct rb_root proc_rel_tree;
+	struct rw_semaphore rb_mutex;
 };
+
+static struct communique cmc;
 
 struct proc_rel {
 	pid_t pid;
 	uint8_t event_to_throw;
-	uint8_t sleeps;
 	struct rb_node node;
+	struct completion waiting;
 };
 
 /*
@@ -52,34 +57,59 @@ struct proc_rel {
  */
 struct proc_rel *communique_rb_search(struct rb_root *root, int event)
 {
-	struct rb_node *node = root->rb_node;
+	struct rb_node *node;
+	down_read(&(cmc.rb_mutex));
+	/*down_read may put the calling process into an uninterruptible sleep!*/
+       	node = root->rb_node;
 	while (node) {
 		struct proc_rel *data = rb_entry(node, struct proc_rel, node);
-		if (event < data->event_to_throw)
+		if (event < data->event_to_throw) {
 			node = node->rb_left;
-		else if (event > data->event_to_throw)
+		} else if (event > data->event_to_throw) {
 			node = node->rb_right;
-		else
+		} else {
+			up_read(&(cmc.rb_mutex));
 			return data;
+		}
 	}
+	up_read(&(cmc.rb_mutex));
 	return NULL;
 }
 
 int communique_rb_insert(struct rb_root *root, struct proc_rel *data)
 {
-	struct rb_node **new = &(root->rb_node), *parent = NULL;
+	struct rb_node **new = NULL, *parent = NULL;
+	down_read(&(cmc.rb_mutex));
+	new = &(root->rb_node);
 	while (*new) {
 		struct proc_rel *this = rb_entry(*new, struct proc_rel, node);
 		parent = *new;
-		if (data->event_to_throw < this->event_to_throw)
+		if (data->event_to_throw < this->event_to_throw) {
 			new = &((*new)->rb_left);
-		else if (data->event_to_throw > this->event_to_throw)
+		} else if (data->event_to_throw > this->event_to_throw) {
 			new = &((*new)->rb_right);
-		else
+		} else {
+			up_read(&(cmc.rb_mutex));
 			return -EINVAL;
+		}
 	}
+	up_read(&(cmc.rb_mutex));
+	down_write(&(cmc.rb_mutex));
 	rb_link_node(&data->node, parent, new);
 	rb_insert_color(&data->node, root);
+	up_write(&(cmc.rb_mutex));
+	return 0;
+}
+
+int communique_pr_remove(struct rb_root *root, int event)
+{
+	struct proc_rel *ret = communique_rb_search(root, event);
+	if (ret == NULL)
+		return -EINVAL;
+	down_write(&(cmc.rb_mutex));
+	rb_erase(&(ret->node), root);
+	up_write(&(cmc.rb_mutex));
+	kfree(ret);
 	return 0;
 }
 
@@ -98,7 +128,8 @@ int communique_open(struct inode *inode_s, struct file *file_s)
 	return 0;
 }
 
-static inline int communique_cp_prs(int *to, const char __user *from, uint8_t n)
+static inline int communique_copy_parse(int *to, const char __user *from, 
+				        uint8_t n)
 {
 	int rt;
 	rt = copy_from_user((char *)to, from, n * sizeof(int));
@@ -107,21 +138,26 @@ static inline int communique_cp_prs(int *to, const char __user *from, uint8_t n)
 	return 0;
 }
 
-static struct communique cmc;
-
-int communique_register(const char __user *args)
+int communique_set(const char __user *args)
 {
 	int rt = 0;
-	int data[2];
+	int event;
 	struct proc_rel *temp = NULL;
-	rt = communique_cp_prs(data, args, 2);
+	struct task_struct *task = NULL;
+	rt = communique_copy_parse(&event, args, 1);
 	if (rt)
 		return rt;
 	temp = kmalloc(sizeof(struct proc_rel), GFP_KERNEL);
 	if (temp == NULL)
 		return -ENOMEM;
-	temp->pid = data[0];
-	temp->event_to_throw = data[1];
+	/*
+	 * remember, that pid may be re-used by another process
+	 * if this process will be terminated. It's temporary assign!
+	 */
+	task = current;
+	temp->pid = task->pid;
+	temp->event_to_throw = event;
+	init_completion(&(temp->waiting));
 	communique_rb_insert(&cmc.proc_rel_tree, temp);
 	return 0;
 }
@@ -132,35 +168,40 @@ void debug_pr(struct proc_rel *temp)
 	       temp->event_to_throw);
 }
 
-int communique_sleep(const char __user *args)
+int communique_wait(const char __user *args)
 {
 	struct proc_rel *temp = NULL;
 	int rt;
 	int event;
-	rt = communique_cp_prs(&event, args, 1);
+	rt = communique_copy_parse(&event, args, 1);
 	if (rt)
 		return rt;
 	temp = communique_rb_search(&cmc.proc_rel_tree, event);
 	if (temp == NULL)
 		return -EINVAL;
-	else
-		debug_pr(temp);
+	rt = wait_for_completion_interruptible(&(temp->waiting));
+	if (!rt)
+		return -EINTR;
 	return 0;
 }
 
 int communique_throw(const char __user *args)
 {
 	struct proc_rel *temp = NULL;
+	struct task_struct *task = NULL;
 	int rt;
-	int data[2];
-	rt = communique_cp_prs(data, args, 2);
+	int event;
+	rt = communique_copy_parse(&event, args, 1);
 	if (rt)
-		return rt;
-	temp = communique_rb_search(&cmc.proc_rel_tree, data[1]);
-	if ((data[0] != temp->pid) || (temp == NULL))
+		return -EAGAIN;
+	temp = communique_rb_search(&cmc.proc_rel_tree, event);
+	if (temp == NULL)
+		return -EINVAL;
+	task = current;
+	else if (task->pid != temp->pid)
 		return -EACCES;
-	else
-		debug_pr(temp);
+	complete_all(&(temp->waiting));
+	reinit_completion(&(temp->waiting));
 	return 0;
 }
 
@@ -168,15 +209,14 @@ long communique_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	switch(cmd) {
 	case SETEVENT:
-		return communique_register((char __user *)arg);
+		return communique_set((char __user *)arg);
 	case WAITFOREVENT:
-		return communique_sleep((char __user *)arg);
+		return communique_wait((char __user *)arg);
 	case THROWEVENT:
 		return communique_throw((char __user *)arg);
 	default:
 		return -EINVAL;
 	}
-
 }
 
 static struct communique cmc = {
@@ -226,6 +266,7 @@ static int __init communique_init(void)
 		rt = PTR_ERR(cmc.device);
 		goto err;
 	}
+	init_rwsem(&(cmc.rb_mutex));
 	return 0;
 err:	
 	if (cmc.cdev) {
