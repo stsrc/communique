@@ -18,7 +18,7 @@
 #include <linux/rwsem.h>
 #include <linux/completion.h>
 #include <linux/thread_info.h>
-
+#include <linux/sched.h>
 MODULE_LICENSE("GPL");
 
 #ifdef DEBUG
@@ -46,10 +46,12 @@ struct communique {
 static struct communique cmc;
 
 struct proc_rel {
-	pid_t pid;
+	pid_t owner_pid;
+	pid_t user_pid;
 	uint8_t event_to_throw;
 	struct rb_node node;
 	struct completion waiting;
+	spinlock_t lock;
 };
 
 /*
@@ -151,21 +153,41 @@ int communique_set(const char __user *args)
 	if (temp == NULL)
 		return -ENOMEM;
 	/*
-	 * remember, that pid may be re-used by another process
+	 * TODO: remember, that pid may be re-used by another process
 	 * if this process will be terminated. It's temporary assign!
 	 */
 	task = current;
-	temp->pid = task->pid;
+	temp->owner_pid = task->pid;
+	temp->user_pid = 0;
 	temp->event_to_throw = event;
+	spin_lock_init(&(temp->lock));
+	rt = communique_rb_insert(&cmc.proc_rel_tree, temp);
+	if (rt) {
+		kfree(temp);
+		return -EINVAL; 
+	}
 	init_completion(&(temp->waiting));
-	communique_rb_insert(&cmc.proc_rel_tree, temp);
 	return 0;
 }
 
 void debug_pr(struct proc_rel *temp)
 {
-	printk(KERN_EMERG "pid: %d, event: %d\n", temp->pid, 
-	       temp->event_to_throw);
+	printk(KERN_EMERG "pid: %d, current pid: %d, event: %d\n", 
+	       (int)temp->owner_pid, (int)current->pid, temp->event_to_throw);
+}
+
+int communique_check_wait(struct proc_rel *temp)
+{
+	spin_lock_irq(&(temp->lock));
+	if (temp->user_pid)
+		return -EAGAIN;
+	return 0;
+}
+
+void communique_set_wait(struct proc_rel *temp)
+{
+	//spinlock!
+	temp->user_pid = current->pid;
 }
 
 int communique_wait(const char __user *args)
@@ -179,16 +201,32 @@ int communique_wait(const char __user *args)
 	temp = communique_rb_search(&cmc.proc_rel_tree, event);
 	if (temp == NULL)
 		return -EINVAL;
+	spin_lock_irq(&(temp->lock));
+	rt = communique_check_wait(temp);
+	if (rt)
+		return rt;
+	communique_set_wait(temp);
+	spin_unlock_irq(&(temp->lock));
 	rt = wait_for_completion_interruptible(&(temp->waiting));
 	if (!rt)
 		return -EINTR;
 	return 0;
 }
 
+int communique_check_throw(struct proc_rel *temp)
+{	
+	//it only disables hw irqs... what about sw??
+	
+	if (current->pid != temp->owner_pid) {
+		debug_pr(temp);
+		return -EACCES;
+	}
+	return 0;
+}
+
 int communique_throw(const char __user *args)
 {
 	struct proc_rel *temp = NULL;
-	struct task_struct *task = NULL;
 	int rt;
 	int event;
 	rt = communique_copy_parse(&event, args, 1);
@@ -197,11 +235,12 @@ int communique_throw(const char __user *args)
 	temp = communique_rb_search(&cmc.proc_rel_tree, event);
 	if (temp == NULL)
 		return -EINVAL;
-	task = current;
-	else if (task->pid != temp->pid)
-		return -EACCES;
+	rt = communique_check_throw(temp);
+	if (rt)
+		return rt;
 	complete_all(&(temp->waiting));
 	reinit_completion(&(temp->waiting));
+	temp->user_pid = 0;
 	return 0;
 }
 
