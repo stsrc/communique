@@ -1,6 +1,6 @@
 ccflags-y += -DDEBUG -std=gnu99 -Wall -Wno-declaration-after-statement
 ifneq ($(KERNELRELEASE),)
-	obj-m := communique.o
+	obj-m := events.o
 
 else
 	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
