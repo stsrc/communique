@@ -27,21 +27,14 @@ int main(void)
 		perror("open");
 		return 1;
 	}
-	char test[5] = "aaaa\0";
-	printf("ioctl SETEVENT proc 2\n");
-	rt = ioctl(fd, SETEVENT, test);
-	ioctl_test(rt);
+	char test = 'a';
 	while(cnt < 5) {
 		printf("ioctl WAITEVENT proc 2\n");
-		rt = ioctl(fd, WAITFOREVENT, test);
+		rt = ioctl(fd, WAITFOREVENT, &test);
 		printf("DUPA DUPA DUPA CHUJ\n");
 		ioctl_test(rt);
 		cnt++;
 	}
-	sleep(5);
-	printf("ioctl UNSETEVENT proc 2\n");
-	rt = ioctl(fd, UNSETEVENT, test);
-	ioctl_test(rt);
 	close(fd);
 	return 0;
 }

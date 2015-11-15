@@ -28,9 +28,9 @@ int main(void)
 		perror("open");
 		return 1;
 	}
-	char test[5] = "aaaa\0";
+	char test = 'a';
 	printf("ioctl SETEVENT proc 1\n");
-	rt = ioctl(fd, SETEVENT, test);
+	rt = ioctl(fd, SETEVENT, &test);
 	ioctl_test(rt);
 	pid = fork();
 	if (pid < 0) {
@@ -49,16 +49,16 @@ int main(void)
 	default:
 		break;
 	}
-	sleep(2);
+	sleep(3);
 	while(cnt < 5) {
 		sleep(3);
 		printf("ioctl THROWEVENT proc 1\n");
-		rt = ioctl(fd, THROWEVENT, test);
+		rt = ioctl(fd, THROWEVENT, &test);
 		ioctl_test(rt);	
 		cnt++;	
 	}
 	printf("ioctl UNSETEVENT proc 1\n");
-	rt = ioctl(fd, UNSETEVENT, test);
+	rt = ioctl(fd, UNSETEVENT, &test);
 	ioctl_test(rt);
 	close(fd);	
 	return 0;

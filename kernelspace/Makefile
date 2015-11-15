@@ -1,4 +1,4 @@
-ccflags-y += -DDEBUG -std=gnu99 -Wno-declaration-after-statement
+ccflags-y += -DDEBUG -std=gnu99 -Wall -Wno-declaration-after-statement
 ifneq ($(KERNELRELEASE),)
 	obj-m := communique.o
 

@@ -37,8 +37,6 @@ MODULE_LICENSE("GPL");
 #define THROWEVENT _IOW(0x8A, 0x03, char __user *)
 #define UNSETEVENT _IOW(0x8A, 0x04, char __user *)
 
-uint8_t BUF_MAX = 5;
-
 struct communique {
 	const char *name;
 	struct cdev *cdev;
@@ -52,13 +50,9 @@ struct communique {
 static struct communique cmc;
 
 struct event {
-	char *name;
+	char name;
 	struct completion waiting;
 	struct list_head list_element;
-	pid_t p_emits[16];
-	int p_emits_cnt;
-	pid_t p_waits[16];
-	int p_waits_cnt;
 };
 
 void communique_destroy(struct communique *cmc)
@@ -69,18 +63,8 @@ void communique_destroy(struct communique *cmc)
 		event = list_entry(pos, struct event, list_element);
 		complete_all(&event->waiting);
 		list_del(pos);
-		kfree(event->name);
 		kfree(event);
 	}	
-}
-
-int communique_search_pid(pid_t *tab, pid_t proc)
-{	
-	for(int i = 0; i < 16; i++) {
-		if (tab[i] == proc)
-			return i;
-	}
-	return -1;
 }
 
 int communique_release(struct inode *inode_s, struct file *file_s)
@@ -93,13 +77,13 @@ int communique_open(struct inode *inode_s, struct file *file_s)
 	return 0;
 }
 
-struct event * communique_search_by_name(struct communique *cmc, char *name)
+struct event * communique_search_by_name(struct communique *cmc, char name)
 {
 	struct list_head *pos = NULL;
 	struct event *event = NULL;
 	list_for_each(pos, &cmc->event_list) {
 		event = list_entry(pos, struct event, list_element);
-		if (strncmp(event->name, name, strlen(name)) == 0)
+		if (event->name == name)
 			return event;
 	}
 	return NULL;
@@ -107,64 +91,26 @@ struct event * communique_search_by_name(struct communique *cmc, char *name)
 
 int communique_delete_event(struct event *event)
 {
-	int i = 0;
-	if (event->p_waits_cnt)
-		return -EAGAIN;
-	i = communique_search_pid(event->p_emits, current->pid);
-	if (i < 0)
-		return -EINVAL;
-	event->p_emits_cnt--;
-	if (event->p_emits_cnt) {
-		event->p_emits[i] = 0;
-	} else {
-		list_del(&event->list_element);	
-		if (event->name != NULL)
-			kfree(event->name);
-		kfree(event);
-	}
+	kfree(event);
 	return 0;
 }
 
-char *communique_get_name(const char __user *buf)
+char communique_get_name(const char __user *buf)
 {
-	int rt;
-	char *name = kmalloc(BUF_MAX, GFP_KERNEL);
-	if (name == NULL)
-		return NULL;
-	memset(name, 0, BUF_MAX);
-	rt = copy_from_user(name, buf, BUF_MAX);
-	if (rt) {
-		kfree(name);
-		return NULL;
-	}
+	char name;
+	copy_from_user(&name, buf, 1);
 	return name;
 }
 
 int communique_set(struct communique *cmc, const char __user *buf)
 {
 	struct event *temp = NULL;
-	char *name = communique_get_name(buf);
-	if (name == NULL)
-		return -ENOMEM;
-	temp = communique_search_by_name(cmc, name);
-	if (temp == NULL) {
-		temp = kmalloc(sizeof(struct event), GFP_KERNEL);
-		if (temp == NULL) {
-			kfree(name);
-			return -ENOMEM;
-		}
-		memset(temp, 0, sizeof(struct event));
-		init_completion(&(temp->waiting));
-		temp->name = name;
-		INIT_LIST_HEAD(&temp->list_element);
-		list_add(&temp->list_element, &cmc->event_list);
-	} else {
-		kfree(name);
-		if (communique_search_pid(temp->p_emits, current->pid) != -1)
-			return -EINVAL;
-	}
-	temp->p_emits[temp->p_emits_cnt] = current->pid;	
-	temp->p_emits_cnt++;
+	char name = communique_get_name(buf);
+	temp = kmalloc(sizeof(struct event), GFP_KERNEL);
+	init_completion(&(temp->waiting));
+	temp->name = name;
+	INIT_LIST_HEAD(&temp->list_element);
+	list_add(&temp->list_element, &cmc->event_list);
 	return 0;
 }
 
@@ -172,11 +118,8 @@ int communique_unset(struct communique *cmc, const char __user *buf)
 {
 	int rt;
 	struct event *temp = NULL;
-	char *name = communique_get_name(buf);
-	if (name == NULL)
-		return -ENOMEM;
+	char name = communique_get_name(buf);
 	temp = communique_search_by_name(cmc, name);
-	kfree(name);
 	if (temp == NULL) {
 		return -EINVAL;
 	}
@@ -193,11 +136,8 @@ struct event *communique_get_name_and_search(struct communique *cmc,
 					     const char __user *buf)
 {
 	struct event *event = NULL;
-	char *name = communique_get_name(buf);
-	if (name == NULL)
-		return NULL;
+	char name = communique_get_name(buf);
 	event = communique_search_by_name(cmc, name);
-	kfree(name);
 	return event;
 }
 
@@ -215,15 +155,10 @@ int communique_wait(struct communique *cmc, const char __user *buf)
 
 int communique_throw(struct communique *cmc, const char __user *buf)
 {
-	int rt;
 	struct event *event = communique_get_name_and_search(cmc, buf);
 	if (event == NULL)
 		return -EINVAL;
-	rt = communique_search_pid(event->p_emits, current->pid);
-	if (rt < 0)
-		return -EINVAL;
 	complete_all(&(event->waiting));
-	mb();
 	reinit_completion(&(event->waiting));
 	return 0;
 }
