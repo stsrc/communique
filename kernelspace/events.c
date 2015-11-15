@@ -66,12 +66,22 @@ int events_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-int events_unset(struct events *cmc, const char __user *buf)
+/*
+ * WARNING - function dynamically allocates memory!
+ * Remember to call free when obtained name string will not be used anymore!
+ */
+char *events_get_name(const char __user *buf)
 {
-	struct event *event;
-	event = cmc->event;
-	kfree(event->name);
-	return 0;
+	int rt;
+	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
+	if (name == NULL)
+		return NULL;
+	rt = copy_from_user(name, buf, glob_name_size);
+	if (rt) {
+		kfree(name);
+		return NULL;
+	}
+	return name;	
 }
 
 struct event *events_search(struct events *cmc, const char *name)
@@ -86,17 +96,32 @@ struct event *events_search(struct events *cmc, const char *name)
 	return NULL;
 }
 
+int events_unset(struct events *cmc, const char __user *buf)
+{
+	struct event *event;
+	char *name = events_get_name(buf);
+        if (name == NULL)
+		return -EINVAL;
+	event = events_search(cmc, name);
+	kfree(name);
+	if (event == NULL)
+		return -EINVAL;
+	list_del(&event->element);
+	kfree(event->name);
+	kfree(event);
+	return 0;
+}
+
 int events_set(struct events *cmc, const char __user *buf)
 {
-	int rt;
 	struct event *event;
-	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
+	char *name = events_get_name(buf);
 	if (name == NULL)
-		return -ENOMEM;
-	rt = copy_from_user(name, buf, glob_name_size);
-	if (rt) {
+		return -EINVAL;
+	event = events_search(cmc, name);
+	if (event != NULL) {
 		kfree(name);
-		return -EAGAIN;
+		return -EINVAL;
 	}
 	event = kmalloc(sizeof(struct event), GFP_KERNEL);
 	if (event == NULL) {
@@ -107,8 +132,6 @@ int events_set(struct events *cmc, const char __user *buf)
 	event->name = name;
 	INIT_LIST_HEAD(&event->element);
 	list_add(&event->element, &cmc->event_list);
-	if(cmc->event_cnt == 1)
-		cmc->event = event;
 	return 0;
 }
 
@@ -116,20 +139,13 @@ int events_wait(struct events *cmc, const char __user *buf)
 {
 	struct event *event;
 	int rt;
-	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
-	if (name == NULL)
-		return -ENOMEM;
-	rt = copy_from_user(name, buf, glob_name_size);
-	if (rt) {
-		kfree(name);
-		return -EAGAIN;
-	}
-	event = cmc->event;
-	if (events_search(cmc, name) == event)
-	       printk(KERN_EMERG "events_search works\n");
-	else
-		printk(KERN_EMERG "events_search does not work\n");
+	char *name = events_get_name(buf);
+        if (name == NULL)
+		return -EINVAL;	
+	event = events_search(cmc, name);
 	kfree(name);
+	if (event == NULL)
+		return -EINVAL;
 	init_completion(&event->waiting);
 	rt = wait_for_completion_interruptible(&event->waiting);
 	if (rt)
@@ -140,7 +156,13 @@ int events_wait(struct events *cmc, const char __user *buf)
 int events_throw(struct events *cmc, const char __user *buf)
 {
 	struct event *event;
-	event = cmc->event;
+	char *name = events_get_name(buf);
+	if (name == NULL)
+		return -EINVAL;
+	event = events_search(cmc, name);
+	kfree(name);
+	if (event == NULL)
+		return -EINVAL;
 	complete_all(&event->waiting);
 	return 0;
 }

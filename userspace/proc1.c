@@ -30,7 +30,8 @@ int main(void)
 		event_check_error(rt, "event_throw");
 		cnt++;
 	}
+	sleep(3);
 	rt = event_unset(event);
-	event_check_error(rt, "event_unset");
+	event_check_error(rt, "event_unset in proc1");
 	return 0;
 }
