@@ -14,6 +14,7 @@
 #include <linux/completion.h>
 #include <linux/list.h>
 #include <linux/string.h>
+#include <linux/compiler.h>
 
 MODULE_LICENSE("GPL");
 
@@ -35,10 +36,13 @@ MODULE_LICENSE("GPL");
 
 uint8_t glob_name_size = 2;
 uint8_t glob_event_cnt_max = 5;
-
+uint8_t glob_completion_cnt_max = 5;
 struct event {
 	char *name;
-	struct completion waiting;
+	struct completion wait[6];
+	struct completion *waiting;
+	int8_t group_completion;
+	int8_t single_completion;
 	struct list_head element;
 };
 
@@ -74,10 +78,11 @@ char *events_get_name(const char __user *buf)
 {
 	int rt;
 	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
-	if (name == NULL)
+	if (unlikely(name == NULL))
 		return NULL;
+	memset(name, 0, sizeof(char)*glob_name_size);
 	rt = copy_from_user(name, buf, glob_name_size);
-	if (rt) {
+	if (unlikely(rt)) {
 		kfree(name);
 		return NULL;
 	}
@@ -98,7 +103,7 @@ struct event *events_get_event(struct events*cmc, const char __user *buf)
 {
 	struct event *event;
 	char *name = events_get_name(buf);
-        if (name == NULL)
+        if (unlikely(name == NULL))
 		return NULL;
 	event = events_search(cmc, name);
 	kfree(name);
@@ -108,7 +113,7 @@ struct event *events_get_event(struct events*cmc, const char __user *buf)
 int events_unset(struct events *cmc, const char __user *buf)
 {
 	struct event *event = events_get_event(cmc, buf);
-	if (event == NULL)
+	if (unlikely(event == NULL))
 		return -EINVAL;
 	list_del(&event->element);
 	kfree(event->name);
@@ -121,7 +126,7 @@ int events_set(struct events *cmc, const char __user *buf)
 {
 	struct event *event;
 	char *name = events_get_name(buf);
-	if (name == NULL)
+	if (unlikely(name == NULL))
 		return -EINVAL;
 	event = events_search(cmc, name);
 	if (event != NULL) {
@@ -130,10 +135,11 @@ int events_set(struct events *cmc, const char __user *buf)
 	}
 
 	event = kmalloc(sizeof(struct event), GFP_KERNEL);
-	if (event == NULL) {
+	if (unlikely(event == NULL)) {
 		kfree(name);
 		return -ENOMEM;
 	}
+	memset(event, 0, sizeof(struct event));
 	cmc->event_cnt++;
 	if (cmc->event_cnt >= glob_event_cnt_max) {
 		cmc->event_cnt--;
@@ -142,6 +148,9 @@ int events_set(struct events *cmc, const char __user *buf)
 		return -ENOMEM;
 	}
 	event->name = name;
+	event->single_completion = -1;
+	event->group_completion = -1;
+	event->waiting = &(event->wait[0]);
 	INIT_LIST_HEAD(&event->element);
 	list_add(&event->element, &cmc->event_list);
 	return 0;
@@ -151,11 +160,11 @@ int events_wait(struct events *cmc, const char __user *buf)
 {
 	int rt;
 	struct event *event = events_get_event(cmc, buf);
-	if (event == NULL)
+	if (unlikely(event == NULL))
 		return -EINVAL;
-	init_completion(&event->waiting);
-	rt = wait_for_completion_interruptible(&event->waiting);
-	if (rt)
+	init_completion(event->waiting);
+	rt = wait_for_completion_interruptible(event->waiting);
+	if (unlikely(rt))
 		return -EINTR;
 	return 0;
 }
@@ -163,9 +172,9 @@ int events_wait(struct events *cmc, const char __user *buf)
 int events_throw(struct events *cmc, const char __user *buf)
 {
 	struct event *event = events_get_event(cmc, buf);
-	if (event == NULL)
+	if (unlikely(event == NULL))
 		return -EINVAL;
-	complete_all(&event->waiting);
+	complete_all(event->waiting);
 	return 0;
 }
 
