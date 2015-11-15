@@ -87,9 +87,7 @@ char *events_get_name(const char __user *buf)
 struct event *events_search(struct events *cmc, const char *name)
 {
 	struct event *event = NULL;
-	struct list_head *pos;
-	list_for_each(pos, &cmc->event_list) {
-		event = list_entry(pos, struct event, element);
+	list_for_each_entry(event, &cmc->event_list, element) {
 		if (strncmp(event->name, name, strlen(name)) == 0)
 			return event;
 	}
