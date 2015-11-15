@@ -4,8 +4,9 @@
 
 int main(void)
 {
-	char event = 'a';
+	char event[2] = "a\0";
 	int rt;
+	int cnt = 0;
 	pid_t pid;
 	rt = event_set(event);
 	event_check_error(rt, "event_set");
@@ -22,11 +23,14 @@ int main(void)
 		break;
 	}
 	sleep(3);
-	while(1) {
+	while(cnt < 4) {
 		sleep(2);
-		printf("Process 1 throws event\n");
+		printf("proc1 throws event.\n");
 		rt = event_throw(event);
 		event_check_error(rt, "event_throw");
+		cnt++;
 	}
+	rt = event_unset(event);
+	event_check_error(rt, "event_unset");
 	return 0;
 }

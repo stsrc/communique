@@ -31,14 +31,15 @@ MODULE_LICENSE("GPL");
 #define THROWEVENT _IOW(0x8A, 0x03, char __user *)
 #define UNSETEVENT _IOW(0x8A, 0x04, char __user *)
 
+uint8_t glob_name_size = 2;
+
 struct event {
-	char name;
-	spinlock_t lock;
+	char *name;
 	struct completion waiting;
 };
 
 struct events {
-	const char *name;
+	const char *driver_name;
 	struct cdev *cdev;
 	dev_t dev;
 	struct class *class;
@@ -62,30 +63,37 @@ int events_open(struct inode *inode, struct file *file)
 
 int events_unset(struct events *cmc, const char __user *buf)
 {
+	struct event *event;
+	event = &cmc->event;
+	kfree(event->name);
 	return 0;
 }
 
 int events_set(struct events *cmc, const char __user *buf)
 {
 	int rt;
-	char name;
+	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
 	struct event *event;
-	rt = copy_from_user(&name, buf, 1);
-	if (rt)
+	rt = copy_from_user(name, buf, glob_name_size);
+	if (rt) {
+		kfree(name);
 		return -EAGAIN;
+	}
 	cmc->event_cnt++;
 	event = &cmc->event;
 	event->name = name;
-	spin_lock_init(&event->lock);
-	init_completion(&event->waiting);
 	return 0;
 }
 
 int events_wait(struct events *cmc, const char __user *buf)
 {
 	struct event *event;
+	int rt;
 	event = &cmc->event;
-	wait_for_completion_interruptible(&event->waiting);
+	init_completion(&event->waiting);
+	rt = wait_for_completion_interruptible(&event->waiting);
+	if (rt)
+		return -EINTR;
 	return 0;
 }
 
@@ -94,7 +102,6 @@ int events_throw(struct events *cmc, const char __user *buf)
 	struct event *event;
 	event = &cmc->event;
 	complete_all(&event->waiting);
-	reinit_completion(&event->waiting);
 	return 0;
 }
 
@@ -115,7 +122,7 @@ long events_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 }
 
 static struct events cmc = {
-	.name = "events",
+	.driver_name = "events",
 	.cdev = NULL,
 	.dev = 0,
 	.class = NULL,
@@ -131,11 +138,11 @@ static struct events cmc = {
 static int __init events_init(void)
 {
 	int rt;
-	rt = alloc_chrdev_region(&cmc.dev, 0, 1, cmc.name);
+	rt = alloc_chrdev_region(&cmc.dev, 0, 1, cmc.driver_name);
 	if (rt)
 		return rt;
 
-	cmc.class = class_create(THIS_MODULE, cmc.name);
+	cmc.class = class_create(THIS_MODULE, cmc.driver_name);
 	if (IS_ERR(cmc.class)) {
 		rt = PTR_ERR(cmc.class);
 		goto err;
@@ -155,7 +162,8 @@ static int __init events_init(void)
 		goto err;
 	}
 
-	cmc.device = device_create(cmc.class, NULL, cmc.dev, NULL, cmc.name);
+	cmc.device = device_create(cmc.class, NULL, cmc.dev, NULL, 
+				   cmc.driver_name);
 	if (IS_ERR(cmc.device)) {
 		rt = PTR_ERR(cmc.device);
 		goto err;

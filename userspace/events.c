@@ -10,52 +10,52 @@ static inline int event_open()
 	return open("/dev/events", O_RDWR);
 }
 
-int event_set(char name)
+int event_set(char *name)
 {
 	int rt, fd;
 	fd = event_open();
 	if (fd < 0)
 		return 1;
-	rt = ioctl(fd, SETEVENT, &name);
+	rt = ioctl(fd, SETEVENT, name);
 	close(fd);
 	if (rt)
 		return 1;
 	return 0;
 }
 
-int event_unset(char name)
+int event_unset(char *name)
 {
 	int rt, fd;
 	fd = event_open();
 	if (fd < 0)
 		return 1;
-	rt = ioctl(fd, UNSETEVENT, &name);
+	rt = ioctl(fd, UNSETEVENT, name);
 	close(fd);
 	if (rt)
 		return 1;
 	return 0;	
 }
 
-int event_throw(char name)
+int event_throw(char *name)
 {
 	int rt, fd;
 	fd = event_open();
 	if (fd < 0)
 		return 1;
-	rt = ioctl(fd, THROWEVENT, &name);
+	rt = ioctl(fd, THROWEVENT, name);
 	close(fd);
 	if (rt)
 		return 1;
 	return 0;
 }
 
-int event_wait(char name)
+int event_wait(char *name)
 {
 	int rt, fd;
 	fd = event_open();
 	if (fd < 0)
 		return 1;
-	rt = ioctl(fd, WAITFOREVENT, &name);
+	rt = ioctl(fd, WAITFOREVENT, name);
 	close(fd);
 	if (rt)
 		return 1;
