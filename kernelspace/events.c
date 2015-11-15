@@ -115,6 +115,7 @@ int events_unset(struct events *cmc, const char __user *buf)
 	list_del(&event->element);
 	kfree(event->name);
 	kfree(event);
+	cmc->event_cnt--;
 	return 0;
 }
 
@@ -129,12 +130,19 @@ int events_set(struct events *cmc, const char __user *buf)
 		kfree(name);
 		return -EINVAL;
 	}
+
 	event = kmalloc(sizeof(struct event), GFP_KERNEL);
 	if (event == NULL) {
 		kfree(name);
 		return -ENOMEM;
 	}
 	cmc->event_cnt++;
+	if (cmc->event_cnt >= glob_event_cnt_max) {
+		cmc->event_cnt--;
+		kfree(name);
+		kfree(event);
+		return -ENOMEM;
+	}
 	event->name = name;
 	INIT_LIST_HEAD(&event->element);
 	list_add(&event->element, &cmc->event_list);
