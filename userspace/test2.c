@@ -21,21 +21,10 @@ int main(void)
 		perror("open");
 		return 1;
 	}
-	int test1[2] = {666, 10};
-	int test2[2] = {777, 11};
-	int test3[2] = {888, 12};
+	int test1 = 10;
 	while(1) {
 		printf("wait for 1\n");
-		rt = ioctl(fd, WAITFOREVENT, &(test1[1]));
+		rt = ioctl(fd, WAITFOREVENT, &test1);
 		perror_ioctl(rt);
-		printf("catched 1\n");
-		printf("wait for 2\n");
-		rt = ioctl(fd, WAITFOREVENT, &(test2[1]));
-		perror_ioctl(rt);
-		printf("catched 2\n");
-		printf("wait for 3\n");
-		rt = ioctl(fd, WAITFOREVENT, &(test3[1]));
-		perror_ioctl(rt);
-		printf("catched 3\n");
 	}
 }

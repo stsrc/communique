@@ -109,8 +109,10 @@ int communique_pr_remove(struct rb_root *root, int event)
 	if (ret == NULL)
 		return -EINVAL;
 	down_write(&(cmc.rb_mutex));
+	spin_lock_irq(&(ret->lock));
 	rb_erase(&(ret->node), root);
 	up_write(&(cmc.rb_mutex));
+	spin_unlock_irq(&(ret->lock));
 	kfree(ret);
 	return 0;
 }
@@ -178,7 +180,6 @@ void debug_pr(struct proc_rel *temp)
 
 int communique_check_wait(struct proc_rel *temp)
 {
-	spin_lock_irq(&(temp->lock));
 	if (temp->user_pid)
 		return -EAGAIN;
 	return 0;
@@ -215,8 +216,6 @@ int communique_wait(const char __user *args)
 
 int communique_check_throw(struct proc_rel *temp)
 {	
-	//it only disables hw irqs... what about sw??
-	
 	if (current->pid != temp->owner_pid) {
 		debug_pr(temp);
 		return -EACCES;
@@ -240,7 +239,6 @@ int communique_throw(const char __user *args)
 		return rt;
 	complete_all(&(temp->waiting));
 	reinit_completion(&(temp->waiting));
-	temp->user_pid = 0;
 	return 0;
 }
 
