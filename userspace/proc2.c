@@ -7,6 +7,9 @@ int main(void) {
 	int rt;
 	int cnt = 0;
 	char event[2] = "a\0";
+	char false_event[2] = "b\0";
+	rt = event_set(false_event);
+	event_check_error(rt, "event_set");
 	printf("Proc2 entered\n");
 	while(cnt < 4) {
 		sleep(1);

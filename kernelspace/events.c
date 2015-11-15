@@ -13,6 +13,7 @@
 #include <uapi/asm-generic/ioctl.h>
 #include <linux/completion.h>
 #include <linux/list.h>
+#include <linux/string.h>
 
 MODULE_LICENSE("GPL");
 
@@ -73,6 +74,18 @@ int events_unset(struct events *cmc, const char __user *buf)
 	return 0;
 }
 
+struct event *events_search(struct events *cmc, const char *name)
+{
+	struct event *event = NULL;
+	struct list_head *pos;
+	list_for_each(pos, &cmc->event_list) {
+		event = list_entry(pos, struct event, element);
+		if (strncmp(event->name, name, strlen(name)) == 0)
+			return event;
+	}
+	return NULL;
+}
+
 int events_set(struct events *cmc, const char __user *buf)
 {
 	int rt;
@@ -94,7 +107,8 @@ int events_set(struct events *cmc, const char __user *buf)
 	event->name = name;
 	INIT_LIST_HEAD(&event->element);
 	list_add(&event->element, &cmc->event_list);
-	cmc->event = event;
+	if(cmc->event_cnt == 1)
+		cmc->event = event;
 	return 0;
 }
 
@@ -102,7 +116,20 @@ int events_wait(struct events *cmc, const char __user *buf)
 {
 	struct event *event;
 	int rt;
+	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
+	if (name == NULL)
+		return -ENOMEM;
+	rt = copy_from_user(name, buf, glob_name_size);
+	if (rt) {
+		kfree(name);
+		return -EAGAIN;
+	}
 	event = cmc->event;
+	if (events_search(cmc, name) == event)
+	       printk(KERN_EMERG "events_search works\n");
+	else
+		printk(KERN_EMERG "events_search does not work\n");
+	kfree(name);
 	init_completion(&event->waiting);
 	rt = wait_for_completion_interruptible(&event->waiting);
 	if (rt)
