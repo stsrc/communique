@@ -12,6 +12,7 @@
 #include <linux/kernel.h>
 #include <uapi/asm-generic/ioctl.h>
 #include <linux/completion.h>
+#include <linux/list.h>
 
 MODULE_LICENSE("GPL");
 
@@ -32,10 +33,12 @@ MODULE_LICENSE("GPL");
 #define UNSETEVENT _IOW(0x8A, 0x04, char __user *)
 
 uint8_t glob_name_size = 2;
+uint8_t glob_event_cnt_max = 5;
 
 struct event {
 	char *name;
 	struct completion waiting;
+	struct list_head element;
 };
 
 struct events {
@@ -45,8 +48,9 @@ struct events {
 	struct class *class;
 	struct file_operations fops;
 	struct device *device;
-	struct event event;
-	int event_cnt;
+	struct list_head event_list;
+	struct event *event;
+	uint8_t event_cnt;
 };
 
 static struct events cmc;
@@ -64,7 +68,7 @@ int events_open(struct inode *inode, struct file *file)
 int events_unset(struct events *cmc, const char __user *buf)
 {
 	struct event *event;
-	event = &cmc->event;
+	event = cmc->event;
 	kfree(event->name);
 	return 0;
 }
@@ -72,16 +76,25 @@ int events_unset(struct events *cmc, const char __user *buf)
 int events_set(struct events *cmc, const char __user *buf)
 {
 	int rt;
-	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
 	struct event *event;
+	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
+	if (name == NULL)
+		return -ENOMEM;
 	rt = copy_from_user(name, buf, glob_name_size);
 	if (rt) {
 		kfree(name);
 		return -EAGAIN;
 	}
+	event = kmalloc(sizeof(struct event), GFP_KERNEL);
+	if (event == NULL) {
+		kfree(name);
+		return -ENOMEM;
+	}
 	cmc->event_cnt++;
-	event = &cmc->event;
 	event->name = name;
+	INIT_LIST_HEAD(&event->element);
+	list_add(&event->element, &cmc->event_list);
+	cmc->event = event;
 	return 0;
 }
 
@@ -89,7 +102,7 @@ int events_wait(struct events *cmc, const char __user *buf)
 {
 	struct event *event;
 	int rt;
-	event = &cmc->event;
+	event = cmc->event;
 	init_completion(&event->waiting);
 	rt = wait_for_completion_interruptible(&event->waiting);
 	if (rt)
@@ -100,7 +113,7 @@ int events_wait(struct events *cmc, const char __user *buf)
 int events_throw(struct events *cmc, const char __user *buf)
 {
 	struct event *event;
-	event = &cmc->event;
+	event = cmc->event;
 	complete_all(&event->waiting);
 	return 0;
 }
@@ -132,7 +145,8 @@ static struct events cmc = {
 		 .compat_ioctl = events_ioctl
 		},
 	.device = NULL,
-	.event_cnt = 1
+	.event_list = LIST_HEAD_INIT(cmc.event_list),
+	.event_cnt = 0
 };
 
 static int __init events_init(void)
