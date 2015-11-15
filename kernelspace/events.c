@@ -96,14 +96,20 @@ struct event *events_search(struct events *cmc, const char *name)
 	return NULL;
 }
 
-int events_unset(struct events *cmc, const char __user *buf)
+struct event *events_get_event(struct events*cmc, const char __user *buf)
 {
 	struct event *event;
 	char *name = events_get_name(buf);
         if (name == NULL)
-		return -EINVAL;
+		return NULL;
 	event = events_search(cmc, name);
 	kfree(name);
+	return event;
+}
+
+int events_unset(struct events *cmc, const char __user *buf)
+{
+	struct event *event = events_get_event(cmc, buf);
 	if (event == NULL)
 		return -EINVAL;
 	list_del(&event->element);
@@ -137,13 +143,8 @@ int events_set(struct events *cmc, const char __user *buf)
 
 int events_wait(struct events *cmc, const char __user *buf)
 {
-	struct event *event;
 	int rt;
-	char *name = events_get_name(buf);
-        if (name == NULL)
-		return -EINVAL;	
-	event = events_search(cmc, name);
-	kfree(name);
+	struct event *event = events_get_event(cmc, buf);
 	if (event == NULL)
 		return -EINVAL;
 	init_completion(&event->waiting);
@@ -155,12 +156,7 @@ int events_wait(struct events *cmc, const char __user *buf)
 
 int events_throw(struct events *cmc, const char __user *buf)
 {
-	struct event *event;
-	char *name = events_get_name(buf);
-	if (name == NULL)
-		return -EINVAL;
-	event = events_search(cmc, name);
-	kfree(name);
+	struct event *event = events_get_event(cmc, buf);
 	if (event == NULL)
 		return -EINVAL;
 	complete_all(&event->waiting);
