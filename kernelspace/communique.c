@@ -14,12 +14,16 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <uapi/asm-generic/ioctl.h>
-#include <linux/rbtree.h>
-#include <linux/rwsem.h>
 #include <linux/completion.h>
 #include <linux/thread_info.h>
 #include <linux/sched.h>
+#include <linux/list.h>
+#include <asm/barrier.h>
 MODULE_LICENSE("GPL");
+
+/*
+ * NOTES: flex_array
+ */
 
 #ifdef DEBUG
 #define debug_message() printk(KERN_EMERG "DEBUG %s %d \n", __FUNCTION__, \
@@ -31,6 +35,9 @@ MODULE_LICENSE("GPL");
 #define SETEVENT _IOW(0x8A, 0x01, char __user *)
 #define WAITFOREVENT _IOW(0x8A, 0x02, char __user *)
 #define THROWEVENT _IOW(0x8A, 0x03, char __user *)
+#define UNSETEVENT _IOW(0x8A, 0x04, char __user *)
+
+uint8_t BUF_MAX = 5;
 
 struct communique {
 	const char *name;
@@ -39,208 +46,185 @@ struct communique {
 	struct class *class;
 	struct file_operations fops;
 	struct device *device;
-	struct rb_root proc_rel_tree;
-	struct rw_semaphore rb_mutex;
+	struct list_head event_list;
 };
 
 static struct communique cmc;
 
-struct proc_rel {
-	pid_t owner_pid;
-	pid_t user_pid;
-	uint8_t event_to_throw;
-	struct rb_node node;
+struct event {
+	char *name;
 	struct completion waiting;
-	spinlock_t lock;
+	struct list_head list_element;
+	pid_t p_emits[16];
+	int p_emits_cnt;
+	pid_t p_waits[16];
+	int p_waits_cnt;
 };
 
-/*
- * functions implemented specially for rbtree
- */
-struct proc_rel *communique_rb_search(struct rb_root *root, int event)
+void communique_destroy(struct communique *cmc)
 {
-	struct rb_node *node;
-	down_read(&(cmc.rb_mutex));
-	/*down_read may put the calling process into an uninterruptible sleep!*/
-       	node = root->rb_node;
-	while (node) {
-		struct proc_rel *data = rb_entry(node, struct proc_rel, node);
-		if (event < data->event_to_throw) {
-			node = node->rb_left;
-		} else if (event > data->event_to_throw) {
-			node = node->rb_right;
-		} else {
-			up_read(&(cmc.rb_mutex));
-			return data;
-		}
+	struct list_head *pos = NULL, *temp = NULL;
+	struct event *event = NULL;
+	list_for_each_safe(pos, temp, &cmc->event_list){
+		event = list_entry(pos, struct event, list_element);
+		complete_all(&event->waiting);
+		list_del(pos);
+		kfree(event->name);
+		kfree(event);
+	}	
+}
+
+int communique_search_pid(pid_t *tab, pid_t proc)
+{	
+	for(int i = 0; i < 16; i++) {
+		if (tab[i] == proc)
+			return i;
 	}
-	up_read(&(cmc.rb_mutex));
-	return NULL;
+	return -1;
 }
-
-int communique_rb_insert(struct rb_root *root, struct proc_rel *data)
-{
-	struct rb_node **new = NULL, *parent = NULL;
-	down_read(&(cmc.rb_mutex));
-	new = &(root->rb_node);
-	while (*new) {
-		struct proc_rel *this = rb_entry(*new, struct proc_rel, node);
-		parent = *new;
-		if (data->event_to_throw < this->event_to_throw) {
-			new = &((*new)->rb_left);
-		} else if (data->event_to_throw > this->event_to_throw) {
-			new = &((*new)->rb_right);
-		} else {
-			up_read(&(cmc.rb_mutex));
-			return -EINVAL;
-		}
-	}
-	up_read(&(cmc.rb_mutex));
-	down_write(&(cmc.rb_mutex));
-	rb_link_node(&data->node, parent, new);
-	rb_insert_color(&data->node, root);
-	up_write(&(cmc.rb_mutex));
-	return 0;
-}
-
-int communique_pr_remove(struct rb_root *root, int event)
-{
-	struct proc_rel *ret = communique_rb_search(root, event);
-	if (ret == NULL)
-		return -EINVAL;
-	down_write(&(cmc.rb_mutex));
-	rb_erase(&(ret->node), root);
-	up_write(&(cmc.rb_mutex));
-	kfree(ret);
-	return 0;
-}
-
-/*
- * drivers functions
- */
 
 int communique_release(struct inode *inode_s, struct file *file_s)
 {
 	return 0;
 }
 
-
 int communique_open(struct inode *inode_s, struct file *file_s)
 {
 	return 0;
 }
 
-static inline int communique_copy_parse(int *to, const char __user *from, 
-				        uint8_t n)
+struct event * communique_search_by_name(struct communique *cmc, char *name)
 {
-	int rt;
-	rt = copy_from_user((char *)to, from, n * sizeof(int));
-	if (rt)
+	struct list_head *pos = NULL;
+	struct event *event = NULL;
+	list_for_each(pos, &cmc->event_list) {
+		event = list_entry(pos, struct event, list_element);
+		if (strncmp(event->name, name, strlen(name)) == 0)
+			return event;
+	}
+	return NULL;
+}
+
+int communique_delete_event(struct event *event)
+{
+	int i = 0;
+	if (event->p_waits_cnt)
 		return -EAGAIN;
+	i = communique_search_pid(event->p_emits, current->pid);
+	if (i < 0)
+		return -EINVAL;
+	event->p_emits_cnt--;
+	if (event->p_emits_cnt) {
+		event->p_emits[i] = 0;
+	} else {
+		list_del(&event->list_element);	
+		if (event->name != NULL)
+			kfree(event->name);
+		kfree(event);
+	}
 	return 0;
 }
 
-int communique_set(const char __user *args)
+char *communique_get_name(const char __user *buf)
+{
+	int rt;
+	char *name = kmalloc(BUF_MAX, GFP_KERNEL);
+	if (name == NULL)
+		return NULL;
+	memset(name, 0, BUF_MAX);
+	rt = copy_from_user(name, buf, BUF_MAX);
+	if (rt) {
+		kfree(name);
+		return NULL;
+	}
+	return name;
+}
+
+int communique_set(struct communique *cmc, const char __user *buf)
+{
+	struct event *temp = NULL;
+	char *name = communique_get_name(buf);
+	if (name == NULL)
+		return -ENOMEM;
+	temp = communique_search_by_name(cmc, name);
+	if (temp == NULL) {
+		temp = kmalloc(sizeof(struct event), GFP_KERNEL);
+		if (temp == NULL) {
+			kfree(name);
+			return -ENOMEM;
+		}
+		memset(temp, 0, sizeof(struct event));
+		init_completion(&(temp->waiting));
+		temp->name = name;
+		INIT_LIST_HEAD(&temp->list_element);
+		list_add(&temp->list_element, &cmc->event_list);
+	} else {
+		kfree(name);
+		if (communique_search_pid(temp->p_emits, current->pid) != -1)
+			return -EINVAL;
+	}
+	temp->p_emits[temp->p_emits_cnt] = current->pid;	
+	temp->p_emits_cnt++;
+	return 0;
+}
+
+int communique_unset(struct communique *cmc, const char __user *buf)
+{
+	int rt;
+	struct event *temp = NULL;
+	char *name = communique_get_name(buf);
+	if (name == NULL)
+		return -ENOMEM;
+	temp = communique_search_by_name(cmc, name);
+	kfree(name);
+	if (temp == NULL) {
+		return -EINVAL;
+	}
+	rt = communique_delete_event(temp);
+	return rt;	
+}
+
+int communique_check_deadlocks(struct communique *cmc, struct event *event)
+{
+	return 0;
+}
+
+struct event *communique_get_name_and_search(struct communique *cmc,
+					     const char __user *buf)
+{
+	struct event *event = NULL;
+	char *name = communique_get_name(buf);
+	if (name == NULL)
+		return NULL;
+	event = communique_search_by_name(cmc, name);
+	kfree(name);
+	return event;
+}
+
+int communique_wait(struct communique *cmc, const char __user *buf)
 {
 	int rt = 0;
-	int event;
-	struct proc_rel *temp = NULL;
-	struct task_struct *task = NULL;
-	rt = communique_copy_parse(&event, args, 1);
-	if (rt)
-		return rt;
-	temp = kmalloc(sizeof(struct proc_rel), GFP_KERNEL);
-	if (temp == NULL)
-		return -ENOMEM;
-	/*
-	 * TODO: remember, that pid may be re-used by another process
-	 * if this process will be terminated. It's temporary assign!
-	 */
-	task = current;
-	temp->owner_pid = task->pid;
-	temp->user_pid = 0;
-	temp->event_to_throw = event;
-	spin_lock_init(&(temp->lock));
-	rt = communique_rb_insert(&cmc.proc_rel_tree, temp);
-	if (rt) {
-		kfree(temp);
-		return -EINVAL; 
-	}
-	init_completion(&(temp->waiting));
-	return 0;
-}
-
-void debug_pr(struct proc_rel *temp)
-{
-	printk(KERN_EMERG "pid: %d, current pid: %d, event: %d\n", 
-	       (int)temp->owner_pid, (int)current->pid, temp->event_to_throw);
-}
-
-int communique_check_wait(struct proc_rel *temp)
-{
-	spin_lock_irq(&(temp->lock));
-	if (temp->user_pid)
-		return -EAGAIN;
-	return 0;
-}
-
-void communique_set_wait(struct proc_rel *temp)
-{
-	//spinlock!
-	temp->user_pid = current->pid;
-}
-
-int communique_wait(const char __user *args)
-{
-	struct proc_rel *temp = NULL;
-	int rt;
-	int event;
-	rt = communique_copy_parse(&event, args, 1);
-	if (rt)
-		return rt;
-	temp = communique_rb_search(&cmc.proc_rel_tree, event);
-	if (temp == NULL)
+	struct event *event = communique_get_name_and_search(cmc, buf);
+	if (event == NULL)
 		return -EINVAL;
-	spin_lock_irq(&(temp->lock));
-	rt = communique_check_wait(temp);
-	if (rt)
-		return rt;
-	communique_set_wait(temp);
-	spin_unlock_irq(&(temp->lock));
-	rt = wait_for_completion_interruptible(&(temp->waiting));
-	if (!rt)
+	rt = wait_for_completion_interruptible(&(event->waiting));
+	if (rt) 
 		return -EINTR;
 	return 0;
 }
 
-int communique_check_throw(struct proc_rel *temp)
-{	
-	//it only disables hw irqs... what about sw??
-	
-	if (current->pid != temp->owner_pid) {
-		debug_pr(temp);
-		return -EACCES;
-	}
-	return 0;
-}
-
-int communique_throw(const char __user *args)
+int communique_throw(struct communique *cmc, const char __user *buf)
 {
-	struct proc_rel *temp = NULL;
 	int rt;
-	int event;
-	rt = communique_copy_parse(&event, args, 1);
-	if (rt)
-		return -EAGAIN;
-	temp = communique_rb_search(&cmc.proc_rel_tree, event);
-	if (temp == NULL)
+	struct event *event = communique_get_name_and_search(cmc, buf);
+	if (event == NULL)
 		return -EINVAL;
-	rt = communique_check_throw(temp);
-	if (rt)
-		return rt;
-	complete_all(&(temp->waiting));
-	reinit_completion(&(temp->waiting));
-	temp->user_pid = 0;
+	rt = communique_search_pid(event->p_emits, current->pid);
+	if (rt < 0)
+		return -EINVAL;
+	complete_all(&(event->waiting));
+	mb();
+	reinit_completion(&(event->waiting));
 	return 0;
 }
 
@@ -248,11 +232,13 @@ long communique_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	switch(cmd) {
 	case SETEVENT:
-		return communique_set((char __user *)arg);
+		return communique_set(&cmc, (char __user *)arg);
 	case WAITFOREVENT:
-		return communique_wait((char __user *)arg);
+		return communique_wait(&cmc, (char __user *)arg);
 	case THROWEVENT:
-		return communique_throw((char __user *)arg);
+		return communique_throw(&cmc, (char __user *)arg);
+	case UNSETEVENT:
+		return communique_unset(&cmc, (char __user *)arg);
 	default:
 		return -EINVAL;
 	}
@@ -269,13 +255,12 @@ static struct communique cmc = {
 		 .compat_ioctl = communique_ioctl
 		},
 	.device = NULL,
-	.proc_rel_tree = RB_ROOT 
+	.event_list = LIST_HEAD_INIT(cmc.event_list)
 };
 
 static int __init communique_init(void)
 {
 	int rt;
-	debug_message();	
 	rt = alloc_chrdev_region(&cmc.dev, 0, 1, cmc.name);
 	if (rt)
 		return rt;
@@ -305,7 +290,6 @@ static int __init communique_init(void)
 		rt = PTR_ERR(cmc.device);
 		goto err;
 	}
-	init_rwsem(&(cmc.rb_mutex));
 	return 0;
 err:	
 	if (cmc.cdev) {
@@ -322,7 +306,7 @@ err:
 
 static void __exit communique_exit(void)
 {
-	debug_message();
+	communique_destroy(&cmc);
 	device_destroy(cmc.class, cmc.dev);
 	cdev_del(cmc.cdev);
 	class_destroy(cmc.class);

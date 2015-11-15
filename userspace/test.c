@@ -1,60 +1,65 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <stdlib.h>
-#include <stropts.h>
 #include <unistd.h>
+#include <stropts.h>
+#include <stdlib.h>
 
 #define SETEVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x01
 #define WAITFOREVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x02
 #define	THROWEVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x03
+#define	UNSETEVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x04
 
-static inline void perror_ioctl(int rt)
+void ioctl_test(int rt)
 {
-	if (rt)
+	if (rt) {
 		perror("ioctl");
+		exit(1);
+	}
 }
 
 int main(void)
 {
-	int rt;
 	pid_t pid;
+	int cnt = 0;
+	int rt;
 	int fd = open("/dev/communique", O_RDWR);
-	if (fd <= 0) {
+	if (fd < 0) {
 		perror("open");
 		return 1;
 	}
-	int test1[2] = {666, 10};
-	int test2[2] = {777, 11};
-	int test3[2] = {888, 12};
-	rt = ioctl(fd, SETEVENT, test1);
-	printf("SETEVENT\n");
-	perror_ioctl(rt);
-	if (rt)
-		return 1;
+	char test[5] = "aaaa\0";
+	printf("ioctl SETEVENT proc 1\n");
+	rt = ioctl(fd, SETEVENT, test);
+	ioctl_test(rt);
 	pid = fork();
+	if (pid < 0) {
+		perror("fork");
+		return 1;
+	}
 	switch(pid) {
 	case 0:
-		execl("./test2\0", (char *)NULL);
+		rt = execl("./test2", NULL);
+		if (rt) {
+			printf("PROBLEMS!\n");
+			close(fd);
+			exit(1);
+		}
+		break;
 	default:
 		break;
 	}
-	while(1) {
-		sleep(2);
-		printf("throws test1\n");
-		rt = ioctl(fd, THROWEVENT, test1);
-		printf("test1 has been thrown\n");
-		perror_ioctl(rt);
-		sleep(2);
-		printf("throws test2\n");
-		rt = ioctl(fd, THROWEVENT, test2);
-		printf("test2 has been thrown\n");
-		perror_ioctl(rt);
-		sleep(2);
-		printf("throws test3\n");
-		rt = ioctl(fd, THROWEVENT, test3);
-		printf("test3 has been thrown\n");
-		perror_ioctl(rt);
+	sleep(2);
+	while(cnt < 5) {
+		sleep(3);
+		printf("ioctl THROWEVENT proc 1\n");
+		rt = ioctl(fd, THROWEVENT, test);
+		ioctl_test(rt);	
+		cnt++;	
 	}
+	printf("ioctl UNSETEVENT proc 1\n");
+	rt = ioctl(fd, UNSETEVENT, test);
+	ioctl_test(rt);
+	close(fd);	
 	return 0;
 }
