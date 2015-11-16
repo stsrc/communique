@@ -23,7 +23,7 @@ int main(void)
 		break;
 	}
 	sleep(3);
-	while(cnt < 4) {
+	while(1) {
 		sleep(2);
 		printf("proc1 throws event.\n");
 		rt = event_throw(event);

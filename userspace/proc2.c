@@ -16,8 +16,8 @@ int main(void) {
 	}
 	rt = event_set(false_event);
 	event_check_error(rt, "event_set");
-	printf("Proc2 entered\n");
-	while(cnt < 4) {
+	printf("proc2 entered\n");
+	while(1) {
 		sleep(1);
 		printf("proc2 sleeps on event.\n");
 		rt = event_wait(event);

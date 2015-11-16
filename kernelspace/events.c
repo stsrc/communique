@@ -15,6 +15,8 @@
 #include <linux/list.h>
 #include <linux/string.h>
 #include <linux/compiler.h>
+#include <linux/rwsem.h>
+#include <linux/mutex.h>
 
 MODULE_LICENSE("GPL");
 
@@ -33,17 +35,19 @@ MODULE_LICENSE("GPL");
 #define WAITFOREVENT _IOW(0x8A, 0x02, char __user *)
 #define THROWEVENT _IOW(0x8A, 0x03, char __user *)
 #define UNSETEVENT _IOW(0x8A, 0x04, char __user *)
+#define WEITINGROUP _IOW(0x8A, 0x05, char __user *)
 
 uint8_t glob_name_size = 2;
 uint8_t glob_event_cnt_max = 5;
-uint8_t glob_completion_cnt_max = 5;
+uint8_t glob_compl_cnt_max = 5;
+
 struct event {
 	char *name;
-	struct completion wait[6];
-	struct completion *waiting;
-	int8_t group_completion;
-	int8_t single_completion;
+	struct completion *wait[6];
+	int8_t s_comp;
+	int8_t kref_temp;
 	struct list_head element;
+	struct mutex lock;
 };
 
 struct events {
@@ -54,7 +58,7 @@ struct events {
 	struct file_operations fops;
 	struct device *device;
 	struct list_head event_list;
-	struct event *event;
+	struct rw_semaphore rw_lock;
 	uint8_t event_cnt;
 };
 
@@ -69,6 +73,14 @@ int events_open(struct inode *inode, struct file *file)
 {
 	return 0;
 }
+
+/*
+ * TODO:
+ * -> mutexes/sempahores/reference counts etc.
+ * -> group call
+ * -> anti-deadlock algorithm
+ * -> more flexible completion *wait[tab]
+ */
 
 /*
  * WARNING - function dynamically allocates memory!
@@ -89,12 +101,17 @@ char *events_get_name(const char __user *buf)
 	return name;	
 }
 
+/*
+ * implement semaphores
+ */
 struct event *events_search(struct events *cmc, const char *name)
 {
 	struct event *event = NULL;
 	list_for_each_entry(event, &cmc->event_list, element) {
-		if (strncmp(event->name, name, strlen(name)) == 0)
+		if (strncmp(event->name, name, strlen(name)) == 0) {
+			up_read(&cmc->rw_lock);
 			return event;
+		}
 	}
 	return NULL;
 }
@@ -112,13 +129,30 @@ struct event *events_get_event(struct events*cmc, const char __user *buf)
 
 int events_unset(struct events *cmc, const char __user *buf)
 {
+	int rt;
 	struct event *event = events_get_event(cmc, buf);
 	if (unlikely(event == NULL))
 		return -EINVAL;
+	down_write(&cmc->rw_lock);
+	rt = mutex_lock_interruptible(&event->lock);
+	if (rt) {
+		mutex_unlock(&event->lock);
+		up_write(&cmc->rw_lock);
+		return -EINTR;
+	}
+	if (event->s_comp || event->kref_temp) {
+		mutex_unlock(&event->lock);
+		up_write(&cmc->rw_lock);
+		return -EAGAIN;
+	}
 	list_del(&event->element);
 	kfree(event->name);
+	event->name = NULL;
+	kfree(event->wait[0]);
+	mutex_unlock(&event->lock);
 	kfree(event);
 	cmc->event_cnt--;
+	up_write(&cmc->rw_lock);
 	return 0;
 }
 
@@ -128,6 +162,7 @@ int events_set(struct events *cmc, const char __user *buf)
 	char *name = events_get_name(buf);
 	if (unlikely(name == NULL))
 		return -EINVAL;
+	down_write(&cmc->rw_lock);
 	event = events_search(cmc, name);
 	if (event != NULL) {
 		kfree(name);
@@ -137,6 +172,7 @@ int events_set(struct events *cmc, const char __user *buf)
 	event = kmalloc(sizeof(struct event), GFP_KERNEL);
 	if (unlikely(event == NULL)) {
 		kfree(name);
+		up_write(&cmc->rw_lock);
 		return -ENOMEM;
 	}
 	memset(event, 0, sizeof(struct event));
@@ -145,14 +181,22 @@ int events_set(struct events *cmc, const char __user *buf)
 		cmc->event_cnt--;
 		kfree(name);
 		kfree(event);
+		up_write(&cmc->rw_lock);
 		return -ENOMEM;
 	}
 	event->name = name;
-	event->single_completion = -1;
-	event->group_completion = -1;
-	event->waiting = &(event->wait[0]);
+	event->wait[0] = kmalloc(sizeof(struct completion), GFP_KERNEL);
+	if (unlikely(event->wait[0] == NULL)) {
+		kfree(name);
+		kfree(event);
+		cmc->event_cnt--;
+		up_write(&cmc->rw_lock);
+		return -ENOMEM;
+	}
 	INIT_LIST_HEAD(&event->element);
+	mutex_init(&event->lock);
 	list_add(&event->element, &cmc->event_list);
+	up_write(&cmc->rw_lock);
 	return 0;
 }
 
@@ -162,33 +206,79 @@ int events_wait(struct events *cmc, const char __user *buf)
 	struct event *event = events_get_event(cmc, buf);
 	if (unlikely(event == NULL))
 		return -EINVAL;
-	init_completion(event->waiting);
-	rt = wait_for_completion_interruptible(event->waiting);
+	rt = mutex_lock_interruptible(&event->lock);
+	if (rt < 0)
+		return -EINTR;
+	/*
+	 * event->wait[0] ALWAYS belongs to "for single event" wait
+	 */
+	if (!event->s_comp)
+		init_completion(event->wait[0]);
+	event->s_comp++;
+	mutex_unlock(&event->lock);
+	rt = wait_for_completion_interruptible(event->wait[0]);
 	if (unlikely(rt))
 		return -EINTR;
 	return 0;
 }
 
+int events_wait_in_group(struct events *cmc, const char __user *buf)
+{
+	return 0;
+}
+
 int events_throw(struct events *cmc, const char __user *buf)
 {
+	int rt;
+	int8_t limit;
 	struct event *event = events_get_event(cmc, buf);
 	if (unlikely(event == NULL))
 		return -EINVAL;
-	complete_all(event->waiting);
+	rt = mutex_lock_interruptible(&event->lock);
+	if (rt < 0)
+		return -EINTR;
+	limit = 0;
+	printk(KERN_EMERG "LIMIT = %d\n", limit);
+	if (unlikely(limit < 0)) {
+		mutex_unlock(&event->lock);
+		return -EINVAL;
+	}
+
+	complete_all(event->wait[limit]);
+	event->s_comp = 0;
+	mutex_unlock(&event->lock);
 	return 0;
 }
 
 long events_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
+	int rt;
 	switch(cmd) {
 	case SETEVENT:
-		return events_set(&cmc, (char __user *)arg);
+		debug_message();
+		rt = events_set(&cmc, (char __user *)arg);
+		debug_message();
+		return rt;
 	case WAITFOREVENT:
-		return events_wait(&cmc, (char __user *)arg);
+		debug_message();
+		rt = events_wait(&cmc, (char __user *)arg);
+		debug_message();
+		return rt;
+	case WEITINGROUP:
+		debug_message();
+		rt = events_wait_in_group(&cmc, (char __user *)arg);
+		debug_message();
+		return rt;
 	case THROWEVENT:
-		return events_throw(&cmc, (char __user *)arg);
+		debug_message();
+		rt = events_throw(&cmc, (char __user *)arg);
+		debug_message();
+		return rt;
 	case UNSETEVENT:
-		return events_unset(&cmc, (char __user *)arg);
+		debug_message();
+		rt = events_unset(&cmc, (char __user *)arg);
+		debug_message();
+		return rt;
 	default:
 		return -EINVAL;
 	}
@@ -201,12 +291,11 @@ static struct events cmc = {
 	.class = NULL,
 	.fops = {.open = events_open,
 		 .release = events_release,
-		 .unlocked_ioctl = events_ioctl,
-		 .compat_ioctl = events_ioctl
+		 .unlocked_ioctl = events_ioctl
 		},
 	.device = NULL,
 	.event_list = LIST_HEAD_INIT(cmc.event_list),
-	.event_cnt = 0
+	.rw_lock = __RWSEM_INITIALIZER(cmc.rw_lock)
 };
 
 static int __init events_init(void)
