@@ -17,7 +17,7 @@
 #include <linux/compiler.h>
 #include <linux/rwsem.h>
 #include <linux/mutex.h>
-
+#include <linux/spinlock.h>
 MODULE_LICENSE("GPL");
 
 /*
@@ -45,9 +45,10 @@ struct event {
 	char *name;
 	struct completion *wait[6];
 	int8_t s_comp;
-	int8_t kref_temp;
 	struct list_head element;
 	struct mutex lock;
+	uint8_t refcount;
+	struct spinlock refcount_lock;
 };
 
 struct events {
@@ -109,7 +110,6 @@ struct event *events_search(struct events *cmc, const char *name)
 	struct event *event = NULL;
 	list_for_each_entry(event, &cmc->event_list, element) {
 		if (strncmp(event->name, name, strlen(name)) == 0) {
-			up_read(&cmc->rw_lock);
 			return event;
 		}
 	}
@@ -127,20 +127,58 @@ struct event *events_get_event(struct events*cmc, const char __user *buf)
 	return event;
 }
 
+static inline void events_increment_refcount(struct event *event)
+{
+	spin_lock(&event->refcount_lock);
+	event->refcount++;
+	spin_unlock(&event->refcount_lock);
+}
+
+static inline void events_decrement_refcount(struct event *event)
+{
+	spin_lock(&event->refcount_lock);
+	if (!event->refcount) {
+		printk(KERN_EMERG "!!!events_decrement_refcount FAILED!!!!\n");
+		return;
+	}
+	event->refcount--;
+	spin_unlock(&event->refcount_lock);
+}
+
+static inline uint8_t events_check_refcount(struct event *event)
+{
+	uint8_t rt;
+	spin_lock(&event->refcount_lock);
+	rt = event->refcount;
+	spin_unlock(&event->refcount_lock);
+	return rt;
+}
+
 int events_unset(struct events *cmc, const char __user *buf)
 {
 	int rt;
-	struct event *event = events_get_event(cmc, buf);
-	if (unlikely(event == NULL))
-		return -EINVAL;
+	uint8_t refcount;
+	struct event *event;
 	down_write(&cmc->rw_lock);
+	event = events_get_event(cmc, buf);
+	if (unlikely(event == NULL)) {
+		up_write(&cmc->rw_lock);
+		return -EINVAL;
+	}
+	events_increment_refcount(event);
 	rt = mutex_lock_interruptible(&event->lock);
 	if (rt) {
 		mutex_unlock(&event->lock);
 		up_write(&cmc->rw_lock);
 		return -EINTR;
 	}
-	if (event->s_comp || event->kref_temp) {
+	if (event->s_comp) {
+		mutex_unlock(&event->lock);
+		up_write(&cmc->rw_lock);
+		return -EAGAIN;
+	}
+	refcount = events_check_refcount(event);
+	if (refcount != 1) {
 		mutex_unlock(&event->lock);
 		up_write(&cmc->rw_lock);
 		return -EAGAIN;
@@ -165,10 +203,10 @@ int events_set(struct events *cmc, const char __user *buf)
 	down_write(&cmc->rw_lock);
 	event = events_search(cmc, name);
 	if (event != NULL) {
+		up_write(&cmc->rw_lock);
 		kfree(name);
 		return -EINVAL;
 	}
-
 	event = kmalloc(sizeof(struct event), GFP_KERNEL);
 	if (unlikely(event == NULL)) {
 		kfree(name);
@@ -195,6 +233,7 @@ int events_set(struct events *cmc, const char __user *buf)
 	}
 	INIT_LIST_HEAD(&event->element);
 	mutex_init(&event->lock);
+	spin_lock_init(&event->refcount_lock);
 	list_add(&event->element, &cmc->event_list);
 	up_write(&cmc->rw_lock);
 	return 0;
@@ -203,12 +242,20 @@ int events_set(struct events *cmc, const char __user *buf)
 int events_wait(struct events *cmc, const char __user *buf)
 {
 	int rt;
-	struct event *event = events_get_event(cmc, buf);
-	if (unlikely(event == NULL))
+	struct event *event;
+	down_read(&cmc->rw_lock);
+	event = events_get_event(cmc, buf);
+	if (unlikely(event == NULL)) {
+		up_read(&cmc->rw_lock);
 		return -EINVAL;
+	}
+	events_increment_refcount(event);
+	up_read(&cmc->rw_lock);
 	rt = mutex_lock_interruptible(&event->lock);
-	if (rt < 0)
+	if (rt < 0) {
+		events_decrement_refcount(event);
 		return -EINTR;
+	}
 	/*
 	 * event->wait[0] ALWAYS belongs to "for single event" wait
 	 */
@@ -217,6 +264,7 @@ int events_wait(struct events *cmc, const char __user *buf)
 	event->s_comp++;
 	mutex_unlock(&event->lock);
 	rt = wait_for_completion_interruptible(event->wait[0]);
+	events_decrement_refcount(event);
 	if (unlikely(rt))
 		return -EINTR;
 	return 0;
@@ -230,23 +278,24 @@ int events_wait_in_group(struct events *cmc, const char __user *buf)
 int events_throw(struct events *cmc, const char __user *buf)
 {
 	int rt;
-	int8_t limit;
-	struct event *event = events_get_event(cmc, buf);
-	if (unlikely(event == NULL))
-		return -EINVAL;
-	rt = mutex_lock_interruptible(&event->lock);
-	if (rt < 0)
-		return -EINTR;
-	limit = 0;
-	printk(KERN_EMERG "LIMIT = %d\n", limit);
-	if (unlikely(limit < 0)) {
-		mutex_unlock(&event->lock);
+	struct event *event;
+	down_read(&cmc->rw_lock);
+	event = events_get_event(cmc, buf);
+	if (unlikely(event == NULL)) {
+		up_read(&cmc->rw_lock);
 		return -EINVAL;
 	}
-
-	complete_all(event->wait[limit]);
+	events_increment_refcount(event);
+	up_read(&cmc->rw_lock);
+	rt = mutex_lock_interruptible(&event->lock);
+	if (rt < 0) {
+		events_decrement_refcount(event);
+		return -EINTR;
+	}
+	complete_all(event->wait[0]);
 	event->s_comp = 0;
 	mutex_unlock(&event->lock);
+	events_decrement_refcount(event);
 	return 0;
 }
 
