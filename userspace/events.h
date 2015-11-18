@@ -11,6 +11,7 @@ int event_set(char *name);
 int event_wait(char *name);
 int event_throw(char *name);
 int event_unset(char *name);
+int event_check_error_exit(int rt, char *st);
 int event_check_error(int rt, char *st);
 
 #endif //_EVENTS_H_

@@ -18,6 +18,8 @@
 #include <linux/rwsem.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
+#include <linux/sched.h>
+#include <asm/io.h>
 MODULE_LICENSE("GPL");
 
 /*
@@ -40,6 +42,7 @@ MODULE_LICENSE("GPL");
 uint8_t glob_name_size = 2;
 uint8_t glob_event_cnt_max = 5;
 uint8_t glob_compl_cnt_max = 5;
+uint8_t glob_proc = 5;
 
 struct event {
 	char *name;
@@ -49,6 +52,8 @@ struct event {
 	struct mutex lock;
 	uint8_t refcount;
 	struct spinlock refcount_lock;
+	pid_t proc_throws[6];
+	pid_t proc_waits[6];
 };
 
 struct events {
@@ -81,6 +86,7 @@ int events_open(struct inode *inode, struct file *file)
  * -> group call
  * -> anti-deadlock algorithm
  * -> more flexible completion *wait[tab]
+ * -> ctrl+C/INTERRUPTS proof!
  */
 
 /*
@@ -94,7 +100,7 @@ char *events_get_name(const char __user *buf)
 	if (unlikely(name == NULL))
 		return NULL;
 	memset(name, 0, sizeof(char)*glob_name_size);
-	rt = copy_from_user(name, buf, glob_name_size);
+	rt = copy_from_user(name, buf, glob_name_size - 1);
 	if (unlikely(rt)) {
 		kfree(name);
 		return NULL;
@@ -102,9 +108,48 @@ char *events_get_name(const char __user *buf)
 	return name;	
 }
 
-/*
- * implement semaphores
- */
+ssize_t events_search_pid(pid_t *arr, size_t size, pid_t pid)
+{
+	for (size_t i = 0; i < size; i++) {
+		if (pid == arr[i])
+			return i;
+	}
+	return -1;
+}
+
+ssize_t events_add_pid(pid_t *arr, ssize_t size, pid_t pid)
+{
+	ssize_t i;
+	i = events_search_pid(arr, size, pid);
+	if (i != -1)
+		return -1;
+	i = events_search_pid(arr, size, 0);
+	if (i == -1)
+		return -1;
+	arr[i] = pid;
+	return 0;
+}
+
+ssize_t events_remove_pid(pid_t *arr, ssize_t size, pid_t pid)
+{
+	ssize_t i;
+	i = events_search_pid(arr, size, pid);
+	if (i == -1)
+		return -1;
+	arr[i] = 0;
+	return 0;
+}
+
+int events_non_zero_pid(pid_t *arr, ssize_t size)
+{
+	int cnt = 0;
+	for (ssize_t i = 0; i < size; i++) {
+		if (arr[i] != 0)
+			cnt++;
+	}
+	return cnt;
+}
+
 struct event *events_search(struct events *cmc, const char *name)
 {
 	struct event *event = NULL;
@@ -139,6 +184,7 @@ static inline void events_decrement_refcount(struct event *event)
 	spin_lock(&event->refcount_lock);
 	if (!event->refcount) {
 		printk(KERN_EMERG "!!!events_decrement_refcount FAILED!!!!\n");
+		spin_unlock(&event->refcount_lock);
 		return;
 	}
 	event->refcount--;
@@ -168,34 +214,68 @@ int events_unset(struct events *cmc, const char __user *buf)
 	events_increment_refcount(event);
 	rt = mutex_lock_interruptible(&event->lock);
 	if (rt) {
-		mutex_unlock(&event->lock);
-		up_write(&cmc->rw_lock);
-		return -EINTR;
+		rt = -EINTR;
+		goto ret;	//should i go here to mutex_unlock?
 	}
 	if (event->s_comp) {
-		mutex_unlock(&event->lock);
-		up_write(&cmc->rw_lock);
-		return -EAGAIN;
+		rt = -EAGAIN;
+		goto ret;
 	}
 	refcount = events_check_refcount(event);
 	if (refcount != 1) {
-		mutex_unlock(&event->lock);
-		up_write(&cmc->rw_lock);
-		return -EAGAIN;
+		rt = -EAGAIN;
+		goto ret;
+	}
+	rt = events_remove_pid(event->proc_throws, glob_proc, current->pid);
+	if (rt) {
+		rt = -EINVAL;
+		goto ret;
+	}
+	rt = events_non_zero_pid(event->proc_throws, glob_proc);
+	if (rt) {
+		rt = 0;
+		goto ret;	
 	}
 	list_del(&event->element);
 	kfree(event->name);
 	event->name = NULL;
+	complete_all(event->wait[0]);
 	kfree(event->wait[0]);
 	mutex_unlock(&event->lock);
 	kfree(event);
 	cmc->event_cnt--;
 	up_write(&cmc->rw_lock);
 	return 0;
+ret:
+	events_decrement_refcount(event);
+	mutex_unlock(&event->lock);
+	up_write(&cmc->rw_lock);
+	return rt;
+}
+
+static inline struct event* events_init_event(char *name)
+{
+	struct event *event = kmalloc(sizeof(struct event), GFP_KERNEL);
+	if (unlikely(event == NULL))
+		return NULL;
+	memset(event, 0, sizeof(struct event));
+	event->name = name;
+	event->wait[0] = kmalloc(sizeof(struct completion), GFP_KERNEL);
+	if (unlikely(event->wait[0] == NULL)) {
+		kfree(event);
+		return NULL;
+	}
+	events_add_pid(event->proc_throws, glob_proc, current->pid);
+	init_completion(event->wait[0]);
+	INIT_LIST_HEAD(&event->element);
+	mutex_init(&event->lock);
+	spin_lock_init(&event->refcount_lock);
+	return event;
 }
 
 int events_set(struct events *cmc, const char __user *buf)
 {
+	int rt;
 	struct event *event;
 	char *name = events_get_name(buf);
 	if (unlikely(name == NULL))
@@ -203,45 +283,33 @@ int events_set(struct events *cmc, const char __user *buf)
 	down_write(&cmc->rw_lock);
 	event = events_search(cmc, name);
 	if (event != NULL) {
+		rt = events_add_pid(event->proc_throws, glob_proc, current->pid);
+		if (rt)
+			rt = -EINVAL;
 		up_write(&cmc->rw_lock);
 		kfree(name);
-		return -EINVAL;
+		return rt;
 	}
-	event = kmalloc(sizeof(struct event), GFP_KERNEL);
-	if (unlikely(event == NULL)) {
-		kfree(name);
-		up_write(&cmc->rw_lock);
-		return -ENOMEM;
-	}
-	memset(event, 0, sizeof(struct event));
 	cmc->event_cnt++;
-	if (cmc->event_cnt >= glob_event_cnt_max) {
-		cmc->event_cnt--;
-		kfree(name);
-		kfree(event);
-		up_write(&cmc->rw_lock);
-		return -ENOMEM;
-	}
-	event->name = name;
-	event->wait[0] = kmalloc(sizeof(struct completion), GFP_KERNEL);
-	if (unlikely(event->wait[0] == NULL)) {
-		kfree(name);
-		kfree(event);
-		cmc->event_cnt--;
-		up_write(&cmc->rw_lock);
-		return -ENOMEM;
-	}
-	INIT_LIST_HEAD(&event->element);
-	mutex_init(&event->lock);
-	spin_lock_init(&event->refcount_lock);
+	if (cmc->event_cnt >= glob_event_cnt_max)
+		goto no_mem;
+	event = events_init_event(name);
+	if (event == NULL)
+		goto no_mem;
 	list_add(&event->element, &cmc->event_list);
 	up_write(&cmc->rw_lock);
 	return 0;
+no_mem:
+	cmc->event_cnt--;
+	kfree(name);
+	up_write(&cmc->rw_lock);
+	return -ENOMEM;
 }
 
 int events_wait(struct events *cmc, const char __user *buf)
 {
 	int rt;
+	int test;
 	struct event *event;
 	down_read(&cmc->rw_lock);
 	event = events_get_event(cmc, buf);
@@ -260,11 +328,25 @@ int events_wait(struct events *cmc, const char __user *buf)
 	 * event->wait[0] ALWAYS belongs to "for single event" wait
 	 */
 	if (!event->s_comp)
-		init_completion(event->wait[0]);
+		init_completion((struct completion *)event->wait[0]);
 	event->s_comp++;
+	rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
 	mutex_unlock(&event->lock);
+	if (rt) {
+		events_decrement_refcount(event);
+		return -EINVAL;
+	}
+	/*
+	 * LOCK HERE?
+	 */
 	rt = wait_for_completion_interruptible(event->wait[0]);
+	mutex_lock(&event->lock);
+	event->s_comp--;
+	test = events_remove_pid(event->proc_waits, glob_proc, current->pid);
+	if (test)
+		debug_message();
 	events_decrement_refcount(event);
+	mutex_unlock(&event->lock);
 	if (unlikely(rt))
 		return -EINTR;
 	return 0;
@@ -288,14 +370,24 @@ int events_throw(struct events *cmc, const char __user *buf)
 	events_increment_refcount(event);
 	up_read(&cmc->rw_lock);
 	rt = mutex_lock_interruptible(&event->lock);
-	if (rt < 0) {
+	rt = events_search_pid(event->proc_throws, glob_proc, current->pid);
+	if (rt == -1) {
+		mutex_unlock(&event->lock);
+		events_decrement_refcount(event);
+		return -EPERM;
+	}
+	if (rt < 0){
 		events_decrement_refcount(event);
 		return -EINTR;
 	}
+	if (!event->s_comp) {
+		mutex_unlock(&event->lock);
+		events_decrement_refcount(event);
+		return 0;
+	}
 	complete_all(event->wait[0]);
-	event->s_comp = 0;
-	mutex_unlock(&event->lock);
 	events_decrement_refcount(event);
+	mutex_unlock(&event->lock);
 	return 0;
 }
 
@@ -304,29 +396,20 @@ long events_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	int rt;
 	switch(cmd) {
 	case SETEVENT:
-		debug_message();
 		rt = events_set(&cmc, (char __user *)arg);
-		debug_message();
 		return rt;
 	case WAITFOREVENT:
-		debug_message();
 		rt = events_wait(&cmc, (char __user *)arg);
-		debug_message();
 		return rt;
 	case WEITINGROUP:
-		debug_message();
 		rt = events_wait_in_group(&cmc, (char __user *)arg);
-		debug_message();
 		return rt;
 	case THROWEVENT:
-		debug_message();
 		rt = events_throw(&cmc, (char __user *)arg);
-		debug_message();
 		return rt;
 	case UNSETEVENT:
-		debug_message();
 		rt = events_unset(&cmc, (char __user *)arg);
-		debug_message();
+
 		return rt;
 	default:
 		return -EINVAL;

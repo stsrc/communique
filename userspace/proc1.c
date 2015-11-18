@@ -22,15 +22,14 @@ int main(void)
 	default:
 		break;
 	}
-	sleep(3);
 	while(cnt < 4) {
-		sleep(2);
-		printf("proc1 throws event.\n");
 		rt = event_throw(event);
+		if (rt == 1)
+			continue;
+		printf("proc1 throws event.\n");
 		event_check_error(rt, "event_throw");
 		cnt++;
 	}
-	sleep(3);
 	rt = event_unset(event);
 	event_check_error(rt, "event_unset in proc1");
 	return 0;

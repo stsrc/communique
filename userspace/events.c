@@ -4,6 +4,7 @@
 #define WAITFOREVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x02
 #define	THROWEVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x03
 #define	UNSETEVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x04
+#define WAITINGROUP (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x05 
 
 static inline int event_open()
 {
@@ -62,11 +63,52 @@ int event_wait(char *name)
 	return 0;
 }
 
-int event_check_error(int rt, char *string)
+struct wait_group {
+	int nbytes;
+	char *events;
+}
+
+int event_wait_group(char **events, int count)
+{
+	struct wait_group wait_group;
+
+	int rt, fd, cnt = 0;
+	fd = event_open();
+	if (fd < 0)
+		return 1;
+	for (int i = 0; i < count; i++)
+		cnt += strlen(events[i]) + 1;
+	cnt += sizeof(int);
+	cnt += 1;
+	wait_group.nbytes = cnt;
+	wait_group.events = malloc(cnt - sizeof(int));
+	if (wait_group.event == NULL)
+		return 1;
+	memset(wait_group.events, 0, cnt - sizeof(int));
+	for (int i = 0; i < count; i++) {
+		strcat(wait_group.events, events[i]);
+		strcat(wait_group.events, "&");
+	}
+	rt = ioctl(fd, WAITINGROUP, &wait_group);
+	free(wait_group.event);
+	close(fd);
+	if (rt)
+		return 1;
+	return 0;
+}
+
+int event_check_error_exit(int rt, char *string)
 {
 	if(rt) {
 		perror(string);
 		exit(rt);
 	}
+	return 0;
+}
+
+int event_check_error(int rt, char *string)
+{
+	if(rt)
+		perror(string);
 	return 0;
 }
