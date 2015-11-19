@@ -66,9 +66,18 @@ int event_wait(char *name)
 struct wait_group {
 	int nbytes;
 	char *events;
+};
+
+void print_wait_group(struct wait_group *wait)
+{
+	printf("struct size: %d\n", (int)sizeof(struct wait_group));
+	printf("int nbytes addr: %lu; char *events addr: %lu\n",
+	       (unsigned long)&wait->nbytes, (unsigned long)&wait->events);
+	printf("nbytes = %d, events = %lu\n", wait->nbytes,
+	       (unsigned long)wait->events);
 }
 
-int event_wait_group(char **events, int count)
+int event_wait_group(char **events, int events_cnt)
 {
 	struct wait_group wait_group;
 
@@ -76,21 +85,23 @@ int event_wait_group(char **events, int count)
 	fd = event_open();
 	if (fd < 0)
 		return 1;
-	for (int i = 0; i < count; i++)
+	for (int i = 0; i < events_cnt; i++)
 		cnt += strlen(events[i]) + 1;
-	cnt += sizeof(int);
-	cnt += 1;
 	wait_group.nbytes = cnt;
-	wait_group.events = malloc(cnt - sizeof(int));
-	if (wait_group.event == NULL)
+	wait_group.events = malloc(cnt);
+	if (wait_group.events == NULL) {
+		close(fd);
 		return 1;
-	memset(wait_group.events, 0, cnt - sizeof(int));
-	for (int i = 0; i < count; i++) {
-		strcat(wait_group.events, events[i]);
-		strcat(wait_group.events, "&");
 	}
+	memset(wait_group.events, 0, cnt);
+	for (int i = 0; i < events_cnt; i++) {
+		strcat(wait_group.events, events[i]);
+		if (i != events_cnt - 1)
+			strcat(wait_group.events, "&");
+	}
+	print_wait_group(&wait_group);
 	rt = ioctl(fd, WAITINGROUP, &wait_group);
-	free(wait_group.event);
+	free(wait_group.events);
 	close(fd);
 	if (rt)
 		return 1;

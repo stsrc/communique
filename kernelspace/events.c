@@ -352,8 +352,41 @@ int events_wait(struct events *cmc, const char __user *buf)
 	return 0;
 }
 
-int events_wait_in_group(struct events *cmc, const char __user *buf)
+struct wait_group {
+	int nbytes;
+	char *events;
+};
+
+void print_wait_group(struct wait_group *wait)
 {
+	printk(KERN_EMERG "struct size: %d", (int)sizeof(struct wait_group));
+	printk(KERN_EMERG "int nbytes addr: %lu; char *events addr: %lu\n",
+	       (unsigned long)&wait->nbytes, (unsigned long)&wait->events);
+	printk(KERN_EMERG "nbytes = %d, events = %lu\n", wait->nbytes,
+	       (unsigned long)wait->events);
+}
+
+int events_wait_in_group(struct events *cmc, const char __user *user_buf)
+{
+	struct wait_group wait_group;
+	char *buf;
+	int rt;
+	rt = copy_from_user(&wait_group, user_buf, sizeof(struct wait_group));
+	if (rt)
+		return -EAGAIN;
+	print_wait_group(&wait_group);
+	buf = kmalloc(wait_group.nbytes, GFP_KERNEL);
+	if (buf == NULL)
+		return -ENOMEM;
+	memset(buf, 0, wait_group.nbytes);
+	rt = copy_from_user(buf, wait_group.events, wait_group.nbytes);
+	if (rt) {
+		kfree(buf);
+		return -EAGAIN;
+	}
+	printk(KERN_EMERG "events_wait_in_group string: %s\n",
+	       wait_group.events);
+	kfree(buf);
 	return 0;
 }
 
