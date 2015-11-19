@@ -87,6 +87,7 @@ int events_open(struct inode *inode, struct file *file)
  * -> anti-deadlock algorithm
  * -> more flexible completion *wait[tab]
  * -> ctrl+C/INTERRUPTS proof!
+ * -> remove EAGAIN from unset.
  */
 
 /*
@@ -200,10 +201,27 @@ static inline uint8_t events_check_refcount(struct event *event)
 	return rt;
 }
 
-int events_unset(struct events *cmc, const char __user *buf)
+static inline int events_check_unset(struct event *event)
 {
 	int rt;
 	uint8_t refcount;
+	if (event->s_comp)
+		return -EAGAIN;
+	refcount = events_check_refcount(event);
+	if (refcount != 1)
+		return -EAGAIN;
+	rt = events_remove_pid(event->proc_throws, glob_proc, current->pid);
+	if (rt)
+		return -EINVAL;
+	rt = events_non_zero_pid(event->proc_throws, glob_proc);
+	if (rt) 
+		return 0;
+	return 1;
+}
+
+int events_unset(struct events *cmc, const char __user *buf)
+{
+	int rt;
 	struct event *event;
 	down_write(&cmc->rw_lock);
 	event = events_get_event(cmc, buf);
@@ -217,25 +235,9 @@ int events_unset(struct events *cmc, const char __user *buf)
 		rt = -EINTR;
 		goto ret;	//should i go here to mutex_unlock?
 	}
-	if (event->s_comp) {
-		rt = -EAGAIN;
+	rt = events_check_unset(event);
+	if (rt != 1)
 		goto ret;
-	}
-	refcount = events_check_refcount(event);
-	if (refcount != 1) {
-		rt = -EAGAIN;
-		goto ret;
-	}
-	rt = events_remove_pid(event->proc_throws, glob_proc, current->pid);
-	if (rt) {
-		rt = -EINVAL;
-		goto ret;
-	}
-	rt = events_non_zero_pid(event->proc_throws, glob_proc);
-	if (rt) {
-		rt = 0;
-		goto ret;	
-	}
 	list_del(&event->element);
 	kfree(event->name);
 	event->name = NULL;
@@ -345,8 +347,8 @@ int events_wait(struct events *cmc, const char __user *buf)
 	test = events_remove_pid(event->proc_waits, glob_proc, current->pid);
 	if (test)
 		debug_message();
-	events_decrement_refcount(event);
 	mutex_unlock(&event->lock);
+	events_decrement_refcount(event);
 	if (unlikely(rt))
 		return -EINTR;
 	return 0;
@@ -403,15 +405,15 @@ int events_throw(struct events *cmc, const char __user *buf)
 	events_increment_refcount(event);
 	up_read(&cmc->rw_lock);
 	rt = mutex_lock_interruptible(&event->lock);
+	if (rt < 0){
+		events_decrement_refcount(event);
+		return -EINTR;
+	}
 	rt = events_search_pid(event->proc_throws, glob_proc, current->pid);
 	if (rt == -1) {
 		mutex_unlock(&event->lock);
 		events_decrement_refcount(event);
 		return -EPERM;
-	}
-	if (rt < 0){
-		events_decrement_refcount(event);
-		return -EINTR;
 	}
 	if (!event->s_comp) {
 		mutex_unlock(&event->lock);
