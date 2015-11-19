@@ -7,12 +7,7 @@ int main(void) {
 	int rt;
 	int cnt = 0;
 	char event[2] = "a\0";
-	if (event_set(event)) {
-		printf("proc2 sees that true event was made.\n");
-	} else {
-		printf("proc2 does not see that true event exists!\n");
-		return 1;
-	}
+	event_set(event);	
 	printf("proc2 entered\n");
 	while(cnt < 4) {
 		printf("proc2 sleeps on event.\n");
