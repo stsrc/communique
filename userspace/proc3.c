@@ -4,6 +4,7 @@
 
 int main(void)
 {
+	int cnt = 0;
 	char eventa[2] = "a\0";
 	char eventb[2] = "b\0";
 	char eventc[2] = "c\0";
@@ -23,20 +24,22 @@ int main(void)
 	pid = fork();
 	switch(pid) {
 	case 0:
-		printf("proc2: event_set\n");
-		rt = event_set(eventa);
-		event_check_error_exit(rt, "proc2 - event_set FAILS!");
-		sleep(3);
-		printf("proc2: event_throw. eventa\n");
-		rt = event_throw(eventa);
-		event_check_error_exit(rt, "proc2: event_throw FAILS!");
+		while(cnt < 4) {
+			printf("proc2: event_wait\n");
+			rt = event_wait_group(events, 4);
+			printf("proc2: event caught\n");
+			event_check_error_exit(rt, "proc2: event_wait FAILS!");
+		}
 		exit(0);
 	default:
 		sleep(1);
-		printf("proc1: event_wait\n");
-		rt = event_wait_group(events, 4);
-		printf("proc1: event caught");
-		event_check_error_exit(rt, "proc1: event_wait FAILS!");
+		while(cnt < 4) {
+			printf("proc1: event_throw, event %s\n", events[cnt]);
+			rt = event_throw(events[cnt]);
+			event_check_error_exit(rt, "proc2: event_throw FAILS!");
+			sleep(2);
+			cnt++;
+		}
 		exit(0);
 	}
 	return 0;
