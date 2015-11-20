@@ -48,6 +48,7 @@ struct event {
 	char *name;
 	struct completion *wait[6];
 	int8_t s_comp;
+	int8_t g_comp;
 	struct list_head element;
 	struct mutex lock;
 	uint8_t refcount;
@@ -368,28 +369,111 @@ void print_wait_group(struct wait_group *wait)
 	       (unsigned long)wait->events);
 }
 
-int events_wait_in_group(struct events *cmc, const char __user *user_buf)
+/*
+ * returned pointer must be freed outside!
+ */
+const char *events_group_get_events(const char __user *user_buf)
 {
 	struct wait_group wait_group;
 	char *buf;
 	int rt;
 	rt = copy_from_user(&wait_group, user_buf, sizeof(struct wait_group));
 	if (rt)
-		return -EAGAIN;
+		return NULL;
 	print_wait_group(&wait_group);
 	buf = kmalloc(wait_group.nbytes, GFP_KERNEL);
 	if (buf == NULL)
-		return -ENOMEM;
+		return NULL;
 	memset(buf, 0, wait_group.nbytes);
 	rt = copy_from_user(buf, wait_group.events, wait_group.nbytes);
 	if (rt) {
 		kfree(buf);
-		return -EAGAIN;
+		return NULL;
 	}
-	printk(KERN_EMERG "events_wait_in_group string: %s\n",
-	       wait_group.events);
-	kfree(buf);
+	return (const char *)buf;
+}
+
+int events_check_events_existances(struct events *cmc, const char *buf)
+{
+	char *temp = (char *)buf;
+	const char *name = NULL;
+	struct event *event;
+	while ((name = strsep(&temp, "&")) != NULL) {
+		event = events_search(cmc, name);
+		if (event == NULL)
+			return 1;
+	}
 	return 0;
+}
+
+/*
+ * returned pointer must be freed outside!
+ */
+struct completion *events_new_completion(void)
+{
+	struct completion *compl = kmalloc(sizeof(struct completion), GFP_KERNEL);
+	if (compl == NULL)
+		return NULL;
+	init_completion(compl);
+	return compl;
+}
+
+int events_insert_completion(struct events *cmc, const char *buf, 
+			     struct completion *completion)
+{
+	int rt;
+	char *temp = (char *)buf;
+	const char *name = NULL;
+	struct event *event;
+	while ((name = strsep(&temp, "&")) != NULL) {
+		event = events_search(cmc, name);
+		mutex_lock(&event->lock);
+		rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
+		if (rt) {
+			/*what if it fails in the middle?
+			 * Nearly impossible though...
+			 */
+			debug_message();
+			mutex_unlock(&event->lock);
+			return -1;
+		}
+		if (event->g_comp + 1 > glob_compl_cnt_max) {
+			debug_message();
+			mutex_unlock(&event->lock);
+			return -1;
+		}
+		event->g_comp++;
+		event->wait[event->g_comp] = completion;
+		mutex_unlock(&event->lock);
+	}
+	return 0;
+}
+
+int events_group_wait(struct events *cmc, const char __user *user_buf)
+{
+	int rt;
+	struct completion *completion;
+	const char *buf = events_group_get_events(user_buf);
+	if (buf == NULL)
+		return -EAGAIN;
+	down_read(&cmc->rw_lock);
+	printk(KERN_EMERG "buffer contains: %s\n", buf);
+	rt = events_check_events_existances(cmc, buf);
+	if (rt) {
+		rt = -EINVAL;
+		goto ret;
+	}
+	completion = events_new_completion();
+	if (completion == NULL) {
+		rt = -ENOMEM;
+		goto ret;
+	}
+	rt = events_insert_completion(cmc, buf, completion);
+	rt = wait_for_completion_interruptible(completion);
+ret:
+	up_read(&cmc->rw_lock);
+	kfree(buf);
+	return rt;
 }
 
 int events_throw(struct events *cmc, const char __user *buf)
@@ -420,7 +504,9 @@ int events_throw(struct events *cmc, const char __user *buf)
 		events_decrement_refcount(event);
 		return 0;
 	}
-	complete_all(event->wait[0]);
+	for(int i = 0; i <= event->g_comp; i++)
+		complete_all(event->wait[i]);
+	event->g_comp = 0;
 	events_decrement_refcount(event);
 	mutex_unlock(&event->lock);
 	return 0;
@@ -437,14 +523,13 @@ long events_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		rt = events_wait(&cmc, (char __user *)arg);
 		return rt;
 	case WEITINGROUP:
-		rt = events_wait_in_group(&cmc, (char __user *)arg);
+		rt = events_group_wait(&cmc, (char __user *)arg);
 		return rt;
 	case THROWEVENT:
 		rt = events_throw(&cmc, (char __user *)arg);
 		return rt;
 	case UNSETEVENT:
 		rt = events_unset(&cmc, (char __user *)arg);
-
 		return rt;
 	default:
 		return -EINVAL;
