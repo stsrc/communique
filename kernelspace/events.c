@@ -53,7 +53,7 @@ struct event {
 	struct mutex lock;
 	uint8_t refcount;
 	struct spinlock refcount_lock;
-	pid_t proc_throws[6];
+	pid_t proc_throws[6]; //O really 6? not 5?
 	pid_t proc_waits[6];
 };
 
@@ -350,10 +350,45 @@ no_mem:
 	return -ENOMEM;
 }
 
+struct event *events_check_if_proc_waits(struct events *cmc, pid_t pid)
+{
+	struct event *event = NULL;
+	list_for_each_entry(event, &cmc->event_list, element) {
+		mutex_lock(&event->lock);
+		if (events_search_pid(event->proc_waits, glob_proc, pid) != -1) {
+			mutex_unlock(&event->lock);
+			return event;
+		}
+		mutex_unlock(&event->lock);
+	}
+	return NULL;	
+}
+
+int events_check_not_deadlock(struct events *cmc, pid_t current_pid, 
+			      struct event *event)
+{	
+	struct event *temp;
+	int rt;
+	for (int i = 0; i < glob_proc; i++) {
+		if (event->proc_throws[i] == 0)
+			continue;
+		if (event->proc_throws[i] == current_pid)
+			return 0;
+		temp = events_check_if_proc_waits(cmc, event->proc_throws[i]);
+		if (temp == NULL)
+			return 1;
+		rt = events_check_not_deadlock(cmc, current_pid, temp);
+		if (rt)
+			return 1;
+		else
+			continue;
+	}	
+	return 0;
+}
+
 int events_wait(struct events *cmc, const char __user *buf)
 {
 	int rt;
-	int test;
 	struct event *event;
 	down_read(&cmc->rw_lock);
 	event = events_get_event(cmc, buf);
@@ -375,20 +410,22 @@ int events_wait(struct events *cmc, const char __user *buf)
 		init_completion((struct completion *)event->wait[0]);
 	event->s_comp++;
 	rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
-	mutex_unlock(&event->lock);
 	if (rt) {
 		events_decrement_refcount(event);
 		return -EINVAL;
 	}
-	/*
-	 * LOCK HERE?
-	 */
+	down_write(&cmc->rw_lock);
+	rt = events_check_not_deadlock(cmc, current->pid, event);
+	up_write(&cmc->rw_lock);
+	if (!rt) {
+		events_decrement_refcount(event);
+		return -EINVAL;
+	}
+	mutex_unlock(&event->lock);
 	rt = wait_for_completion_interruptible(event->wait[0]);
 	mutex_lock(&event->lock);
 	event->s_comp--;
-	test = events_remove_pid(event->proc_waits, glob_proc, current->pid);
-	if (test)
-		debug_message();
+	events_remove_pid(event->proc_waits, glob_proc, current->pid);
 	mutex_unlock(&event->lock);
 	events_decrement_refcount(event);
 	if (unlikely(rt))
@@ -539,10 +576,6 @@ int events_remove_completion(struct events *cmc, const char *buf,
 	return 0;
 }
 
-
-/*
- * TODO: MEMORY LEAK! MEMORY LEAK! MEMORY LEAK!
- */
 int events_group_wait(struct events *cmc, const char __user *user_buf)
 {
 	int rt;
@@ -571,11 +604,8 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	down_read(&cmc->rw_lock);
 	events_remove_completion(cmc, buf, completion);
 	up_read(&cmc->rw_lock);
-	/*
-	 * kfree(completion); SPINLOCK HERE (right now memory leak). There
-	 * is a need to create struct with completion, anti-free mutex, and
-	 * linked list element. Then it will be possible to do something different.
-	 */
+	while (spin_is_locked(&completion->wait.lock));
+	kfree(completion);
 	kfree(buf);
 	return rt;
 ret:
