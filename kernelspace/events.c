@@ -395,14 +395,20 @@ const char *events_group_get_events(const char __user *user_buf)
 
 int events_check_events_existances(struct events *cmc, const char *buf)
 {
-	char *temp = (char *)buf;
+	char *temp = kmalloc(strlen(buf)+1, GFP_KERNEL);
+	if (temp == NULL)
+		return -1;
+	strcpy(temp, buf);
 	const char *name = NULL;
 	struct event *event;
 	while ((name = strsep(&temp, "&")) != NULL) {
 		event = events_search(cmc, name);
-		if (event == NULL)
+		if (event == NULL) {
+			kfree(temp);
 			return 1;
+		}
 	}
+	kfree(temp);
 	return 0;
 }
 
@@ -422,22 +428,27 @@ int events_insert_completion(struct events *cmc, const char *buf,
 			     struct completion *completion)
 {
 	int rt;
-	char *temp = (char *)buf;
 	const char *name = NULL;
 	struct event *event;
+	char *temp = kmalloc(strlen(buf)+1, GFP_KERNEL);
+	if (temp == NULL)
+		return -ENOMEM;
+	strcpy(temp, buf);
 	while ((name = strsep(&temp, "&")) != NULL) {
 		event = events_search(cmc, name);
-		mutex_lock(&event->lock);
+		mutex_lock_interruptible(&event->lock);
 		rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
 		if (rt) {
 			/*what if it fails in the middle?
 			 * Nearly impossible though...
 			 */
+			kfree(temp);
 			debug_message();
 			mutex_unlock(&event->lock);
 			return -1;
 		}
 		if (event->g_comp + 1 > glob_compl_cnt_max) {
+			kfree(temp);
 			debug_message();
 			mutex_unlock(&event->lock);
 			return -1;
@@ -446,6 +457,7 @@ int events_insert_completion(struct events *cmc, const char *buf,
 		event->wait[event->g_comp] = completion;
 		mutex_unlock(&event->lock);
 	}
+	kfree(temp);
 	return 0;
 }
 
@@ -469,7 +481,12 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 		goto ret;
 	}
 	rt = events_insert_completion(cmc, buf, completion);
+	debug_message();
+	up_read(&cmc->rw_lock);
 	rt = wait_for_completion_interruptible(completion);
+	debug_message();
+	kfree(buf);
+	return 0;
 ret:
 	up_read(&cmc->rw_lock);
 	kfree(buf);
@@ -488,6 +505,7 @@ int events_throw(struct events *cmc, const char __user *buf)
 	}
 	events_increment_refcount(event);
 	up_read(&cmc->rw_lock);
+	debug_message();
 	rt = mutex_lock_interruptible(&event->lock);
 	if (rt < 0){
 		events_decrement_refcount(event);
@@ -499,13 +517,17 @@ int events_throw(struct events *cmc, const char __user *buf)
 		events_decrement_refcount(event);
 		return -EPERM;
 	}
-	if (!event->s_comp) {
+	if (!event->s_comp && !event->g_comp) {
 		mutex_unlock(&event->lock);
 		events_decrement_refcount(event);
 		return 0;
 	}
-	for(int i = 0; i <= event->g_comp; i++)
+	debug_message();
+	if (event->s_comp)
+		complete_all(event->wait[0]);
+	for(int i = 1; i <= event->g_comp; i++)
 		complete_all(event->wait[i]);
+	debug_message();
 	event->g_comp = 0;
 	events_decrement_refcount(event);
 	mutex_unlock(&event->lock);
