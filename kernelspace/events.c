@@ -71,6 +71,11 @@ struct events {
 
 static struct events cmc;
 
+static inline void create_oops(void)
+{
+	*(int *)NULL = 0;
+}
+
 int events_release(struct inode *inode, struct file *file)
 {
 	return 0;
@@ -152,6 +157,42 @@ int events_non_zero_pid(pid_t *arr, ssize_t size)
 	return cnt;
 }
 
+ssize_t events_search_compl(struct completion **arr, size_t size,
+			    struct completion *compl)
+{
+	for (size_t i = 0; i < size; i++) {
+		if (compl == arr[i])
+			return i;
+	}
+	return -1;
+}
+
+ssize_t events_add_compl(struct completion **arr, ssize_t size,
+			 struct completion *compl)
+{
+	ssize_t i;
+	i = events_search_compl(arr, size, compl);
+	if (i != -1)
+		return -1;
+	i = events_search_compl(arr, size, 0);
+	if (i == -1)
+		return -1;
+	arr[i] = compl;
+	return 0;
+}
+
+ssize_t events_remove_compl(struct completion **arr, ssize_t size,
+			    struct completion *compl)
+{
+	ssize_t i;
+	i = events_search_compl(arr, size, compl);
+	if (i == -1)
+		return -1;
+	arr[i] = 0;
+	return 0;
+}
+
+
 struct event *events_search(struct events *cmc, const char *name)
 {
 	struct event *event = NULL;
@@ -206,7 +247,7 @@ static inline int events_check_unset(struct event *event)
 {
 	int rt;
 	uint8_t refcount;
-	if (event->s_comp)
+	if (event->s_comp || event->g_comp)
 		return -EAGAIN;
 	refcount = events_check_refcount(event);
 	if (refcount != 1)
@@ -380,7 +421,6 @@ const char *events_group_get_events(const char __user *user_buf)
 	rt = copy_from_user(&wait_group, user_buf, sizeof(struct wait_group));
 	if (rt)
 		return NULL;
-	print_wait_group(&wait_group);
 	buf = kmalloc(wait_group.nbytes, GFP_KERNEL);
 	if (buf == NULL)
 		return NULL;
@@ -439,28 +479,70 @@ int events_insert_completion(struct events *cmc, const char *buf,
 		mutex_lock_interruptible(&event->lock);
 		rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
 		if (rt) {
-			/*what if it fails in the middle?
-			 * Nearly impossible though...
-			 */
 			kfree(temp);
-			debug_message();
+			create_oops();
 			mutex_unlock(&event->lock);
 			return -1;
 		}
 		if (event->g_comp + 1 > glob_compl_cnt_max) {
 			kfree(temp);
-			debug_message();
 			mutex_unlock(&event->lock);
 			return -1;
 		}
 		event->g_comp++;
-		event->wait[event->g_comp] = completion;
+		rt = events_add_compl(event->wait, glob_compl_cnt_max, completion);
+		if (rt) {
+			events_remove_pid(event->proc_waits, glob_proc, 
+					  current->pid);
+			kfree(temp);
+			mutex_unlock(&event->lock);
+			return -1;
+		}
 		mutex_unlock(&event->lock);
 	}
 	kfree(temp);
 	return 0;
 }
 
+int events_remove_completion(struct events *cmc, const char *buf, 
+			     struct completion *completion)
+{
+	int rt;
+	const char *name = NULL;
+	struct event *event;
+	char *temp = kmalloc(strlen(buf)+1, GFP_KERNEL);
+	if (temp == NULL)
+		return -ENOMEM;
+	strcpy(temp, buf);
+	while ((name = strsep(&temp, "&")) != NULL) {
+		event = events_search(cmc, name);
+		mutex_lock_interruptible(&event->lock);
+		rt = events_remove_pid(event->proc_waits, glob_proc, current->pid);
+		if (rt) {
+			kfree(temp);
+			mutex_unlock(&event->lock);
+			create_oops();
+			return -1;
+		}
+		event->g_comp--;
+		rt = events_remove_compl(event->wait, glob_compl_cnt_max,
+					 completion);
+		if (rt)	{
+			kfree(temp);
+			mutex_unlock(&event->lock);
+			create_oops();
+			return -1;	
+		}	
+		mutex_unlock(&event->lock);
+	}
+	kfree(temp);
+	return 0;
+}
+
+
+/*
+ * TODO: MEMORY LEAK! MEMORY LEAK! MEMORY LEAK!
+ */
 int events_group_wait(struct events *cmc, const char __user *user_buf)
 {
 	int rt;
@@ -484,9 +566,18 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	debug_message();
 	up_read(&cmc->rw_lock);
 	rt = wait_for_completion_interruptible(completion);
-	debug_message();
+	if (rt)
+		rt = -EINTR;
+	down_read(&cmc->rw_lock);
+	events_remove_completion(cmc, buf, completion);
+	up_read(&cmc->rw_lock);
+	/*
+	 * kfree(completion); SPINLOCK HERE (right now memory leak). There
+	 * is a need to create struct with completion, anti-free mutex, and
+	 * linked list element. Then it will be possible to do something different.
+	 */
 	kfree(buf);
-	return 0;
+	return rt;
 ret:
 	up_read(&cmc->rw_lock);
 	kfree(buf);
