@@ -88,9 +88,10 @@ int events_open(struct inode *inode, struct file *file)
 
 /*
  * TODO:
- * -> mutexes/sempahores/reference counts etc.
- * -> group call
  * -> anti-deadlock algorithm
+ * -> group call - WHAT IF THERE IS NO ONE OF EVENT?!?!
+ *  -> event_throw - meaby change position of closing rw_lock and mutex_lock?
+ * -> check semaphores (is it really mutual exclusions
  * -> more flexible completion *wait[tab]
  * -> ctrl+C/INTERRUPTS proof!
  * -> remove EAGAIN from unset.
@@ -252,7 +253,7 @@ static inline int events_check_unset(struct event *event)
 	refcount = events_check_refcount(event);
 	if (refcount != 1)
 		return -EAGAIN;
-	rt = events_remove_pid(event->proc_throws, glob_proc, current->pid);
+	rt = events_search_pid(event->proc_throws, glob_proc, current->pid);
 	if (rt)
 		return -EINVAL;
 	rt = events_non_zero_pid(event->proc_throws, glob_proc);
@@ -280,6 +281,7 @@ int events_unset(struct events *cmc, const char __user *buf)
 	rt = events_check_unset(event);
 	if (rt != 1)
 		goto ret;
+	events_remove_pid(event->proc_throws, glob_proc, current->pid);
 	list_del(&event->element);
 	kfree(event->name);
 	event->name = NULL;
@@ -327,7 +329,15 @@ int events_set(struct events *cmc, const char __user *buf)
 	down_write(&cmc->rw_lock);
 	event = events_search(cmc, name);
 	if (event != NULL) {
+		rt = mutex_lock_interruptible(&event->lock);
+		if (rt) {
+			rt = -EINTR;
+			up_write(&cmc->rw_lock);
+			kfree(name);
+			return rt;
+		}
 		rt = events_add_pid(event->proc_throws, glob_proc, current->pid);
+		mutex_unlock(&event->lock);
 		if (rt)
 			rt = -EINVAL;
 		up_write(&cmc->rw_lock);
@@ -403,9 +413,7 @@ int events_wait(struct events *cmc, const char __user *buf)
 		events_decrement_refcount(event);
 		return -EINTR;
 	}
-	/*
-	 * event->wait[0] ALWAYS belongs to "for single event" wait
-	 */
+
 	if (!event->s_comp)
 		init_completion((struct completion *)event->wait[0]);
 	event->s_comp++;
@@ -414,14 +422,14 @@ int events_wait(struct events *cmc, const char __user *buf)
 		events_decrement_refcount(event);
 		return -EINVAL;
 	}
+	mutex_unlock(&event->lock);
 	down_write(&cmc->rw_lock);
 	rt = events_check_not_deadlock(cmc, current->pid, event);
 	up_write(&cmc->rw_lock);
 	if (!rt) {
 		events_decrement_refcount(event);
-		return -EINVAL;
+		return -EDEADLK;
 	}
-	mutex_unlock(&event->lock);
 	rt = wait_for_completion_interruptible(event->wait[0]);
 	mutex_lock(&event->lock);
 	event->s_comp--;
