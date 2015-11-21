@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "events.h"
+#include <errno.h>
 
 int main(void)
 {
@@ -29,6 +30,7 @@ int main(void)
 			rt = event_wait_group(events, 4);
 			printf("proc2: event caught\n");
 			event_check_error_exit(rt, "proc2: event_wait FAILS!");
+			cnt++;
 		}
 		exit(0);
 	default:
@@ -40,6 +42,28 @@ int main(void)
 			sleep(2);
 			cnt++;
 		}
+		sleep(5);
+		do {
+			printf("ddupa\n");
+			rt = event_unset(events[0]);
+			printf("rt = %d\n", rt);
+			event_check_error(rt, "proc1: event_unset event0");
+		} while(rt < 0);
+		sleep(1);
+		do {
+			rt = event_unset(events[1]);
+			event_check_error(rt, "proc1: event_unset event1");
+		} while(rt == -EAGAIN);
+		sleep(1);
+		do {
+			rt = event_unset(events[2]);
+			event_check_error(rt, "proc1: event_unset event2");
+		} while(rt == -EAGAIN);
+		sleep(1);
+		do {
+			rt = event_unset(events[3]);
+			event_check_error(rt, "proc1: event_unset event3");
+		} while(rt == -EAGAIN);
 		exit(0);
 	}
 	return 0;
