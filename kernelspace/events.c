@@ -88,7 +88,7 @@ int events_open(struct inode *inode, struct file *file)
 
 /*
  * TODO:
- * -> anti-deadlock algorithm
+ * -> anti-deadlock algorithm in un-set too!
  * -> group call - WHAT IF THERE IS NO ONE OF EVENT?!?!
  *  -> event_throw - meaby change position of closing rw_lock and mutex_lock?
  * -> check semaphores (is it really mutual exclusions
@@ -360,38 +360,48 @@ no_mem:
 	return -ENOMEM;
 }
 
-struct event *events_check_if_proc_waits(struct events *cmc, pid_t pid)
+int events_check_if_proc_waits(struct events *cmc, pid_t pid, 
+			       struct event **event)
 {
-	struct event *event = NULL;
-	list_for_each_entry(event, &cmc->event_list, element) {
-		mutex_lock(&event->lock);
-		if (events_search_pid(event->proc_waits, glob_proc, pid) != -1) {
-			mutex_unlock(&event->lock);
-			return event;
+	int rt = -1;
+	struct event *temp = NULL;
+	list_for_each_entry(temp, &cmc->event_list, element) {
+		if ((*event != NULL) && (*event != temp))
+			continue;
+		mutex_lock(&temp->lock);
+		if (events_search_pid(temp->proc_waits, glob_proc, pid) != -1) {
+			mutex_unlock(&temp->lock);
+			if (rt == -1) {
+				*event = temp;
+				rt = 0;
+			} else {
+				rt = 1;
+			}
 		}
-		mutex_unlock(&event->lock);
+		mutex_unlock(&temp->lock);
 	}
-	return NULL;	
+	return rt;
 }
 
 int events_check_not_deadlock(struct events *cmc, pid_t current_pid, 
 			      struct event *event)
 {	
-	struct event *temp;
-	int rt;
+	struct event *temp = NULL;
+	int rt, more_events = 1;
 	for (int i = 0; i < glob_proc; i++) {
 		if (event->proc_throws[i] == 0)
 			continue;
 		if (event->proc_throws[i] == current_pid)
-			return 0;
-		temp = events_check_if_proc_waits(cmc, event->proc_throws[i]);
-		if (temp == NULL)
-			return 1;
-		rt = events_check_not_deadlock(cmc, current_pid, temp);
-		if (rt)
-			return 1;
-		else
 			continue;
+		while (more_events > 0) {
+			more_events = events_check_if_proc_waits
+				      (cmc, event->proc_throws[i], &temp);
+			if (temp == NULL)
+				return 1;
+			rt = events_check_not_deadlock(cmc, current_pid, temp);
+			if (rt)
+				return 1;
+		}
 	}	
 	return 0;
 }
@@ -427,6 +437,8 @@ int events_wait(struct events *cmc, const char __user *buf)
 	rt = events_check_not_deadlock(cmc, current->pid, event);
 	up_write(&cmc->rw_lock);
 	if (!rt) {
+		events_remove_pid(event->proc_waits, glob_proc, current->pid);
+		event->s_comp--;
 		events_decrement_refcount(event);
 		return -EDEADLK;
 	}
