@@ -53,8 +53,8 @@ int main(void)
 		break;
 	}
 	sleep(1);
-	printf("event_wait(event[2] - should fail\n");
+	printf("proc1 - event_wait - should fail\n");
 	rt = event_wait(events[2]);
-	event_check_error_exit(rt, "proc3 - event_wait SHOULD FAIL!");
+	event_check_error_exit(rt, "proc1 - event_wait SHOULD FAIL!");
 	printf("PROC3 NO FAILURE - WHOOOP WHOOP ITS WRONG\n");
 }

@@ -3,7 +3,7 @@ CC = gcc
 CFLAGS := -O3 -Wall -std=gnu99
 SRCFILES := $(wildcard test*.c)
 OBJFILES := $(patsubst %.c, %.o, $(SRCFILES)) events.o
-PROGFILES := $(patsubst %.c, %.T, $(SRCFILES))
+PROGFILES := $(patsubst %.c, %, $(SRCFILES))
 
 .PHONY: events all clean
 

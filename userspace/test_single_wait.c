@@ -36,8 +36,6 @@ void proc2(char *event)
 		event_check_error(rt, "proc2 - event_wait");
 		cnt++;
 	}
-	rt = event_unset(event);
-	event_check_error_exit(rt, "proc2 - event_unset");
 	exit(0);
 }
 

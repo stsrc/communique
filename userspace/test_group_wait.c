@@ -38,6 +38,7 @@ int main(void)
 			event_check_error_exit(rt, "proc2: event_wait FAILS!");
 			cnt++;
 		}
+		printf("proc2: exiting\n");
 		exit(0);
 	default:
 		sleep(1);
@@ -49,27 +50,16 @@ int main(void)
 			cnt++;
 		}
 		sleep(5);
-		do {
-			printf("ddupa\n");
-			rt = event_unset(events[0]);
-			printf("rt = %d\n", rt);
-			event_check_error(rt, "proc1: event_unset event0");
-		} while(rt < 0);
-		sleep(1);
-		do {
-			rt = event_unset(events[1]);
-			event_check_error(rt, "proc1: event_unset event1");
-		} while(rt == -EAGAIN);
-		sleep(1);
-		do {
-			rt = event_unset(events[2]);
-			event_check_error(rt, "proc1: event_unset event2");
-		} while(rt == -EAGAIN);
-		sleep(1);
-		do {
-			rt = event_unset(events[3]);
-			event_check_error(rt, "proc1: event_unset event3");
-		} while(rt == -EAGAIN);
+		printf("proc1: Unsetting events\n");
+		rt = event_unset(events[0]);
+		event_check_error(rt, "proc1: event_unset event0");
+		rt = event_unset(events[1]);
+		event_check_error(rt, "proc1: event_unset event1");
+		rt = event_unset(events[2]);
+		event_check_error(rt, "proc1: event_unset event2");
+		rt = event_unset(events[3]);
+		event_check_error(rt, "proc1: event_unset event3");
+		printf("proc1: exiting\n");
 		exit(0);
 	}
 	return 0;

@@ -8,9 +8,7 @@
 *.swp
 *.cmd
 kernelspace/.tmp_versions
-proc1
-proc2
-*.T
+test*[^c]
 *.out
 *.tmp
 *.swo

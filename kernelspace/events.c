@@ -47,8 +47,6 @@ struct event {
 	int8_t g_comp;
 	struct list_head element;
 	struct mutex lock;
-	uint8_t refcount;
-	struct spinlock refcount_lock;
 	pid_t proc_throws[6]; //O really 6? not 5?
 	pid_t proc_waits[6];
 };
@@ -72,6 +70,29 @@ static inline void generate_oops(void)
 	*(int *)NULL = 0;
 }
 
+void events_diagnose_event(struct event *event)
+{
+	if (event == NULL) {
+		printk("events_diagnose_event: event NULL!\n");
+		return;
+	}
+	printk(KERN_EMERG "name: %s\n", event->name);
+	printk(KERN_EMERG "int8_t s_comp: %d\n", event->s_comp);
+	printk(KERN_EMERG "int8_t g_comp: %d\n", event->g_comp);
+	for (int i = 0; i < glob_compl_cnt_max; i++) {
+		printk(KERN_EMERG "struct completion *wait[%d]: %lu\n",
+		       i, (unsigned long)event->wait[i]);
+	}
+	for(int i = 0; i < glob_proc; i++) {
+		printk(KERN_EMERG "pid_t proc_throws[%d]: %lu\n",
+		       i, (unsigned long)event->proc_throws[i]);
+	}
+	for(int i = 0; i < glob_proc; i++) {
+		printk(KERN_EMERG "pid_t proc_waits[%d]: %lu\n",
+		       i, (unsigned long)event->proc_waits[i]);
+	}
+}
+
 int events_release(struct inode *inode, struct file *file)
 {
 	return 0;
@@ -85,8 +106,6 @@ int events_open(struct inode *inode, struct file *file)
 /*
  * TODO:
  * -> anti-deadlock algorithm
- * -> group call - WHAT IF THERE IS NO ONE OF EVENT?!?!
- *  -> event_throw - meaby change position of closing rw_lock and mutex_lock?
  * -> check semaphores (is it really mutual exclusions
  * -> more flexible completion *wait[tab]
  * -> ctrl+C/INTERRUPTS proof!
@@ -212,43 +231,12 @@ struct event *events_get_event(struct events*cmc, const char __user *buf)
 	return event;
 }
 
-static inline void events_increment_refcount(struct event *event)
-{
-	spin_lock(&event->refcount_lock);
-	//event->refcount++;
-	spin_unlock(&event->refcount_lock);
-}
-
-static inline void events_decrement_refcount(struct event *event)
-{
-	spin_lock(&event->refcount_lock);
-//	if (!event->refcount) {
-//		generate_oops();
-//		spin_unlock(&event->refcount_lock);
-//		return;
-//	}
-//	event->refcount--;
-	spin_unlock(&event->refcount_lock);
-}
-
-static inline uint8_t events_check_refcount(struct event *event)
-{
-	uint8_t rt;
-	spin_lock(&event->refcount_lock);
-	rt = event->refcount;
-	spin_unlock(&event->refcount_lock);
-	return rt;
-}
 
 static inline int events_check_unset(struct event *event)
 {
 	int rt;
-	//uint8_t refcount;
 	if (event->s_comp || event->g_comp)	
 		return -EAGAIN;
-//	refcount = events_check_refcount(event);
-//	if (refcount != 1)
-//		return -EAGAIN;
 	rt = events_search_pid(event->proc_throws, glob_proc, current->pid);
 	if (rt == -1)
 		return -EACCES;
@@ -276,7 +264,6 @@ int events_unset(struct events *cmc, const char __user *buf)
 		up_write(&cmc->rw_lock);
 		return -EINVAL;
 	}
-	events_increment_refcount(event);
 	rt = mutex_lock_interruptible(&event->lock);
 	if (rt) {
 		rt = -EINTR;
@@ -296,7 +283,6 @@ int events_unset(struct events *cmc, const char __user *buf)
 	up_write(&cmc->rw_lock);
 	return 0;
 ret:
-	events_decrement_refcount(event);
 	if (rt != -EINTR) //is it okay? check in a while
 		mutex_unlock(&event->lock);
 	up_write(&cmc->rw_lock);
@@ -319,7 +305,6 @@ static inline struct event* events_init_event(char *name)
 	init_completion(event->wait[0]);
 	INIT_LIST_HEAD(&event->element);
 	mutex_init(&event->lock);
-	spin_lock_init(&event->refcount_lock);
 	return event;
 }
 
@@ -383,11 +368,17 @@ int events_check_not_deadlock(struct events *cmc, pid_t current_pid,
 {	
 	struct event *temp;
 	int rt;
+	pid_t pid_throwing;
 	for (int i = 0; i < glob_proc; i++) {
-		if (event->proc_throws[i] == 0)
+		pid_throwing = event->proc_throws[i];
+		if (pid_throwing == 0)
 			continue;
-		if (event->proc_throws[i] == current_pid)
-			return 0;
+		if (pid_throwing == current_pid)
+			continue;
+		rt = events_search_pid(event->proc_waits, glob_proc, 
+				       pid_throwing);
+		if (rt != -1)
+			continue;
 		temp = events_check_if_proc_waits(cmc, event->proc_throws[i]);
 		if (temp == NULL)
 			return 1;
@@ -410,37 +401,28 @@ int events_wait(struct events *cmc, const char __user *buf)
 		up_read(&cmc->rw_lock);
 		return -EINVAL;
 	}
-	events_increment_refcount(event);
 	rt = mutex_lock_interruptible(&event->lock);
 	up_read(&cmc->rw_lock);
-	if (rt < 0) {
-		events_decrement_refcount(event);
+	if (rt < 0)
 		return -EINTR;
-	}
-
 	if (!event->s_comp)
 		init_completion((struct completion *)event->wait[0]);
 	event->s_comp++;
 	rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
-	if (rt) {
-		events_decrement_refcount(event);
+	if (rt)
 		return -EINVAL;
-	}
 	mutex_unlock(&event->lock);
 	down_write(&cmc->rw_lock);
 	rt = events_check_not_deadlock(cmc, current->pid, event);
 	up_write(&cmc->rw_lock);
-	if (!rt) {
-		events_decrement_refcount(event);
+	if (!rt)
 		return -EDEADLK;
-	}
 	rt = wait_for_completion_interruptible(event->wait[0]);
 	mutex_lock(&event->lock);
 	event->s_comp--;
 	events_remove_pid(event->proc_waits, glob_proc, current->pid);
 	if (rt != -EINTR)
 		mutex_unlock(&event->lock);
-	events_decrement_refcount(event);
 	if (unlikely(rt))
 		return -EINTR;
 	return 0;
@@ -578,8 +560,11 @@ int events_group_check_not_deadlock(struct events *cmc, const char *buf)
 	if (temp == NULL)
 		return -ENOMEM;
 	strcpy(temp, buf);
+	debug_message();
 	while ((name = strsep(&temp, "&")) != NULL) {
+		debug_message();
 		event = events_search(cmc, name);
+		events_diagnose_event(event);
 		if (unlikely(event == NULL)) {
 			generate_oops();
 			return -EINVAL;
@@ -650,22 +635,17 @@ int events_throw(struct events *cmc, const char __user *buf)
 		up_read(&cmc->rw_lock);
 		return -EINVAL;
 	}
-	events_increment_refcount(event);
 	rt = mutex_lock_interruptible(&event->lock);
 	up_read(&cmc->rw_lock);
-	if (rt < 0){
-		events_decrement_refcount(event);
+	if (rt < 0)
 		return -EINTR;
-	}
 	rt = events_search_pid(event->proc_throws, glob_proc, current->pid);
 	if (rt == -1) {
 		mutex_unlock(&event->lock);
-		events_decrement_refcount(event);
 		return -EPERM;
 	}
 	if (!event->s_comp && !event->g_comp) {
 		mutex_unlock(&event->lock);
-		events_decrement_refcount(event);
 		return 0;
 	}
 	if (event->s_comp)
@@ -673,8 +653,6 @@ int events_throw(struct events *cmc, const char __user *buf)
 	for(int i = 1; i <= event->g_comp; i++)
 		complete_all(event->wait[i]);
 	mutex_unlock(&event->lock);
-	events_decrement_refcount(event);
-
 	return 0;
 }
 
@@ -774,6 +752,7 @@ static void __exit events_exit(void)
 	class_destroy(cmc.class);
 	unregister_chrdev_region(cmc.dev, 1);
 	list_for_each_entry_safe(event, temp, &cmc.event_list, element) {
+		events_diagnose_event(event);
 		events_remove_at_exit(&cmc, event);
 	}
 	up_write(&cmc.rw_lock);
