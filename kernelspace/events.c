@@ -243,15 +243,9 @@ static inline uint8_t events_check_refcount(struct event *event)
 static inline int events_check_unset(struct event *event)
 {
 	int rt;
-	uint8_t refcount;
-	if (event->s_comp || event->g_comp) {
-		debug_message();
-		printk(KERN_EMERG "event name: %s\n", event->name);
-		printk(KERN_EMERG "event->g_comp = %d\n", event->g_comp);
-		printk(KERN_EMERG "event->s_comp = %d\n", event->s_comp);
-
+	//uint8_t refcount;
+	if (event->s_comp || event->g_comp)	
 		return -EAGAIN;
-	}
 //	refcount = events_check_refcount(event);
 //	if (refcount != 1)
 //		return -EAGAIN;
@@ -269,7 +263,7 @@ void events_delete_event(struct event *event)
 	while (spin_is_locked(&event->wait[0]->wait.lock));
 	kfree(event->wait[0]);
 	mutex_unlock(&event->lock);
-	kfree(event);
+	kfree(event); //harmfull
 }
 
 int events_unset(struct events *cmc, const char __user *buf)
@@ -457,15 +451,6 @@ struct wait_group {
 	char *events;
 };
 
-void print_wait_group(struct wait_group *wait)
-{
-	printk(KERN_EMERG "struct size: %d", (int)sizeof(struct wait_group));
-	printk(KERN_EMERG "int nbytes addr: %lu; char *events addr: %lu\n",
-	       (unsigned long)&wait->nbytes, (unsigned long)&wait->events);
-	printk(KERN_EMERG "nbytes = %d, events = %lu\n", wait->nbytes,
-	       (unsigned long)wait->events);
-}
-
 /*
  * returned pointer must be freed outside!
  */
@@ -533,16 +518,17 @@ int events_remove_completion(struct events *cmc, const char *buf,
 	while ((name = strsep(&temp, "&")) != NULL) {
 		event = events_search(cmc, name);
 		mutex_lock_interruptible(&event->lock);
-		event->g_comp--;
-		rt = events_remove_pid(event->proc_waits, glob_proc, current->pid);	
+		events_remove_pid(event->proc_waits, glob_proc, current->pid);	
 		rt = events_remove_compl(event->wait, glob_compl_cnt_max,
 					 completion);	
+		if (rt != -1)
+		       event->g_comp--;
 		mutex_unlock(&event->lock);
 	}
 	kfree(temp);
 	return 0;
 }
-
+//MUTUAL EXCLUSIONS HERE. ARE THEY OK?
 int events_insert_completion(struct events *cmc, const char *buf, 
 			     struct completion *completion)
 {
@@ -555,31 +541,27 @@ int events_insert_completion(struct events *cmc, const char *buf,
 	strcpy(temp, buf);
 	while ((name = strsep(&temp, "&")) != NULL) {
 		event = events_search(cmc, name);
-		mutex_lock_interruptible(&event->lock);
+		mutex_lock(&event->lock);
 		rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
-		if (rt) {
-			kfree(temp);
-			generate_oops();
+		if (rt == -1) {
+			/*
+			 * event->pid_waits is full or bad events (input
+			 * string contains the same event more than one)
+			 */
 			mutex_unlock(&event->lock);
 			events_remove_completion(cmc, buf, completion);
-			return -1;
-		}
-		if (event->g_comp + 1 > glob_compl_cnt_max) {
 			kfree(temp);
-			mutex_unlock(&event->lock);
-			events_remove_completion(cmc, buf, completion);
-			return -1;
-		}
-		event->g_comp++;
+			return -ENOMEM;
+		}	
 		rt = events_add_compl(event->wait, glob_compl_cnt_max, completion);
 		if (rt) {
-			events_remove_pid(event->proc_waits, glob_proc, 
-					  current->pid);
-			event->g_comp--;
-			kfree(temp);
 			mutex_unlock(&event->lock);
-			return -1;
+			events_remove_completion(cmc, buf, completion);
+			kfree(temp);
+			return -ENOMEM;
+
 		}
+		event->g_comp++;	
 		mutex_unlock(&event->lock);
 	}
 	kfree(temp);
@@ -591,7 +573,7 @@ int events_group_check_not_deadlock(struct events *cmc, const char *buf)
 	int rt = 0;
 	const char *name = NULL;
 	struct event *event;
-	pid_t current_pid;
+	pid_t current_pid = current->pid;
 	char *temp = kmalloc(strlen(buf)+1, GFP_KERNEL);
 	if (temp == NULL)
 		return -ENOMEM;
@@ -617,8 +599,7 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	const char *buf = events_group_get_events(user_buf);
 	if (buf == NULL)
 		return -ENOMEM;
-	down_read(&cmc->rw_lock);
-	printk(KERN_EMERG "buffer contains: %s\n", buf);
+	down_write(&cmc->rw_lock);//testing purpose, i don't want anything to change
 	rt = events_check_events_existances(cmc, buf);
 	if (rt) {
 		rt = -EINVAL;
@@ -642,19 +623,19 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 		kfree(completion);
 		goto ret;
 	}
-	up_read(&cmc->rw_lock);
+	up_write(&cmc->rw_lock);
 	rt = wait_for_completion_interruptible(completion);
 	if (rt)
 		rt = -EINTR;
-	down_read(&cmc->rw_lock);
+	down_write(&cmc->rw_lock);
 	events_remove_completion(cmc, buf, completion);
-	up_read(&cmc->rw_lock);
+	up_write(&cmc->rw_lock);
 	while (spin_is_locked(&completion->wait.lock));
 	kfree(completion);
 	kfree(buf);
 	return rt;
 ret:
-	up_read(&cmc->rw_lock);
+	up_write(&cmc->rw_lock);
 	kfree(buf);
 	return rt;
 }
@@ -741,19 +722,16 @@ static int __init events_init(void)
 	rt = alloc_chrdev_region(&cmc.dev, 0, 1, cmc.driver_name);
 	if (rt)
 		return rt;
-
 	cmc.class = class_create(THIS_MODULE, cmc.driver_name);
 	if (IS_ERR(cmc.class)) {
 		rt = PTR_ERR(cmc.class);
 		goto err;
 	}
-
 	cmc.cdev = cdev_alloc();
 	if (!cmc.cdev) {
 		rt = -ENOMEM;
 		goto err;
 	}
-
 	cdev_init(cmc.cdev, &cmc.fops);
 	rt = cdev_add(cmc.cdev, cmc.dev, 1);
 	if (rt) {
@@ -761,7 +739,6 @@ static int __init events_init(void)
 		cmc.cdev = NULL;
 		goto err;
 	}
-
 	cmc.device = device_create(cmc.class, NULL, cmc.dev, NULL, 
 				   cmc.driver_name);
 	if (IS_ERR(cmc.device)) {
@@ -782,12 +759,24 @@ err:
 	return rt;
 }
 
+void events_remove_at_exit(struct events *cmc, struct event *event)
+{
+	events_delete_event(event);
+	cmc->event_cnt--;
+}
+
 static void __exit events_exit(void)
 {
+	struct event *event = NULL, *temp = NULL;
+	down_write(&cmc.rw_lock);
 	device_destroy(cmc.class, cmc.dev);
 	cdev_del(cmc.cdev);
 	class_destroy(cmc.class);
 	unregister_chrdev_region(cmc.dev, 1);
+	list_for_each_entry_safe(event, temp, &cmc.event_list, element) {
+		events_remove_at_exit(&cmc, event);
+	}
+	up_write(&cmc.rw_lock);
 }
 
 module_init(events_init);

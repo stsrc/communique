@@ -68,15 +68,6 @@ struct wait_group {
 	char *events;
 };
 
-void print_wait_group(struct wait_group *wait)
-{
-	printf("struct size: %d\n", (int)sizeof(struct wait_group));
-	printf("int nbytes addr: %lu; char *events addr: %lu\n",
-	       (unsigned long)&wait->nbytes, (unsigned long)&wait->events);
-	printf("nbytes = %d, events = %lu\n", wait->nbytes,
-	       (unsigned long)wait->events);
-}
-
 int event_wait_group(char **events, int events_cnt)
 {
 	struct wait_group wait_group;
@@ -99,7 +90,6 @@ int event_wait_group(char **events, int events_cnt)
 		if (i != events_cnt - 1)
 			strcat(wait_group.events, "&");
 	}
-	print_wait_group(&wait_group);
 	rt = ioctl(fd, WAITINGROUP, &wait_group);
 	free(wait_group.events);
 	close(fd);

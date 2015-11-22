@@ -10,6 +10,7 @@
 kernelspace/.tmp_versions
 proc1
 proc2
-test*
+*.T
 *.out
 *.tmp
+*.swo

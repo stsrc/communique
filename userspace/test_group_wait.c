@@ -3,6 +3,12 @@
 #include "events.h"
 #include <errno.h>
 
+/*
+ * TEST SCENARIO:
+ * first process throws one of the four event,
+ * second waits in group_wait
+ */
+
 int main(void)
 {
 	int cnt = 0;

@@ -1,25 +1,15 @@
 CC = gcc
-LD = gcc
 
 CFLAGS := -O3 -Wall -std=gnu99
+SRCFILES := $(wildcard test*.c)
+OBJFILES := $(patsubst %.c, %.o, $(SRCFILES)) events.o
+PROGFILES := $(patsubst %.c, %.T, $(SRCFILES))
 
-ALL := proc1 proc2
+.PHONY: events all clean
 
-.PHONY: clean proc1 proc2
+events: events.o
 
-OBJS := events.o
-
-OBJS1 := $(OBJS) proc1.o
-OBJS2 := $(OBJS) proc2.o 
-
-proc1 : $(OBJS1)
-	$(LD) $(OBJS1) -o $@
-
-proc2 : $(OBJS2)
-	$(LD) $(OBJS2) -o $@
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
+all: $(PROGFILES)
+$(PROGFILES) : events.o
 clean:
-	rm -f $(ALL) $(OBJS)
+	rm -f $(OBJFILES) $(PROGFILES) *~
