@@ -14,6 +14,7 @@ void proc2(char **events)
 	printf("proc2 - event_throw\n");
 	rt = event_throw(events[1]);
 	event_check_error_exit(rt, "proc2 - event_throw, FAILED - SHOULD NOT FAIL!");
+	printf("proc2 - event_unset\n");
 	rt = event_unset(events[1]);
 	event_check_error_exit(rt, "proc2 - event_unset, FAILED - SHOULD NOT FAIL!");
 	printf("proc2 - dead\n");
@@ -29,6 +30,7 @@ void proc3(char **events)
 	printf("proc3 - event_wait\n");
 	rt = event_wait(events[1]);
 	event_check_error_exit(rt, "proc3 - event_wait, FAILED - SHOULD NOT FAIL!");
+	printf("proc3 - event_unset\n");
 	rt = event_unset(events[2]);
 	event_check_error_exit(rt, "proc3 - event_unset, FAILED - SHOULD NOT FAIL!");
 	printf("proc3 - dead\n");

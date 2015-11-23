@@ -43,6 +43,7 @@ uint8_t glob_proc = 5;
 struct event {
 	char *name;
 	struct completion *wait[6];
+	struct completion *unset;
 	int8_t s_comp;
 	int8_t g_comp;
 	struct list_head element;
@@ -64,6 +65,7 @@ struct events {
 };
 
 static struct events cmc;
+struct completion *events_new_completion(void);
 
 static inline void generate_oops(void)
 {
@@ -208,7 +210,6 @@ ssize_t events_remove_compl(struct completion **arr, ssize_t size,
 	return 0;
 }
 
-
 struct event *events_search(struct events *cmc, const char *name)
 {
 	struct event *event = NULL;
@@ -231,7 +232,6 @@ struct event *events_get_event(struct events*cmc, const char __user *buf)
 	return event;
 }
 
-
 static inline int events_check_unset(struct event *event)
 {
 	int rt;
@@ -251,7 +251,7 @@ void events_delete_event(struct event *event)
 	while (spin_is_locked(&event->wait[0]->wait.lock));
 	kfree(event->wait[0]);
 	mutex_unlock(&event->lock);
-	kfree(event); //harmfull
+	kfree(event);
 }
 
 int events_unset(struct events *cmc, const char __user *buf)
@@ -269,7 +269,29 @@ int events_unset(struct events *cmc, const char __user *buf)
 		rt = -EINTR;
 		goto ret;	//should i go here to mutex_unlock?
 	}
+	if (event->unset != NULL) {
+		rt = 0;
+		goto ret;
+	} 
 	rt = events_check_unset(event);
+	if (rt == -EAGAIN) {
+		while(rt == -EAGAIN) {
+			event->unset = events_new_completion();
+			if (event->unset == NULL) {
+				rt = -ENOMEM;
+				goto ret;
+			}
+			mutex_unlock(&event->lock);
+			up_write(&cmc->rw_lock);
+			wait_for_completion(event->unset);
+			down_write(&cmc->rw_lock);
+			rt = mutex_lock_interruptible(&event->lock);
+			rt = events_check_unset(event);
+			while(spin_is_locked(&event->unset->wait.lock));
+			kfree(event->unset);
+			event->unset = NULL;
+		}
+	}
 	if (rt < 0)
 		goto ret;
 	events_remove_pid(event->proc_throws, glob_proc, current->pid);
@@ -303,6 +325,7 @@ static inline struct event* events_init_event(char *name)
 	}
 	events_add_pid(event->proc_throws, glob_proc, current->pid);
 	init_completion(event->wait[0]);
+	event->unset = NULL;
 	INIT_LIST_HEAD(&event->element);
 	mutex_init(&event->lock);
 	return event;
@@ -353,6 +376,11 @@ struct event *events_check_if_proc_waits(struct events *cmc, pid_t pid)
 {
 	struct event *event = NULL;
 	list_for_each_entry(event, &cmc->event_list, element) {
+		if (event == NULL) {
+			debug_message();
+			printk("DEREFERENCING event == NULL!!!\n");
+			return NULL;
+		}
 		mutex_lock(&event->lock);
 		if (events_search_pid(event->proc_waits, glob_proc, pid) != -1) {
 			mutex_unlock(&event->lock);
@@ -369,20 +397,42 @@ int events_check_not_deadlock(struct events *cmc, pid_t current_pid,
 	struct event *temp;
 	int rt;
 	pid_t pid_throwing;
+	if (event == NULL) {
+		debug_message();
+		printk("DEREFERENCING event == NULL!!!\n");
+		return -EINVAL;
+	}
+	debug_message();
 	for (int i = 0; i < glob_proc; i++) {
+		debug_message();
+		mutex_lock(&event->lock);
+		debug_message();
 		pid_throwing = event->proc_throws[i];
+		debug_message();
+		mutex_unlock(&event->lock);
+		debug_message();
 		if (pid_throwing == 0)
 			continue;
 		if (pid_throwing == current_pid)
 			continue;
+		debug_message();
+		mutex_lock(&event->lock);
+		debug_message();
 		rt = events_search_pid(event->proc_waits, glob_proc, 
 				       pid_throwing);
+		debug_message();
+		mutex_unlock(&event->lock);
+		debug_message();
 		if (rt != -1)
 			continue;
-		temp = events_check_if_proc_waits(cmc, event->proc_throws[i]);
+		debug_message();
+		temp = events_check_if_proc_waits(cmc, pid_throwing);
+		debug_message();
 		if (temp == NULL)
 			return 1;
+		debug_message();
 		rt = events_check_not_deadlock(cmc, current_pid, temp);
+		debug_message();
 		if (rt)
 			return 1;
 		else
@@ -420,6 +470,8 @@ int events_wait(struct events *cmc, const char __user *buf)
 	rt = wait_for_completion_interruptible(event->wait[0]);
 	mutex_lock(&event->lock);
 	event->s_comp--;
+	if (event->unset)
+		complete(event->unset);
 	events_remove_pid(event->proc_waits, glob_proc, current->pid);
 	if (rt != -EINTR)
 		mutex_unlock(&event->lock);
@@ -499,12 +551,20 @@ int events_remove_completion(struct events *cmc, const char *buf,
 	strcpy(temp, buf);
 	while ((name = strsep(&temp, "&")) != NULL) {
 		event = events_search(cmc, name);
+		if (event == NULL) {
+			debug_message();
+			printk("DEREFERENCING event == NULL!!!\n");
+			continue;
+		}
 		mutex_lock_interruptible(&event->lock);
 		events_remove_pid(event->proc_waits, glob_proc, current->pid);	
 		rt = events_remove_compl(event->wait, glob_compl_cnt_max,
 					 completion);	
-		if (rt != -1)
-		       event->g_comp--;
+		if (rt != -1) {
+			event->g_comp--;
+			if (event->unset)
+				complete(event->unset);
+		}
 		mutex_unlock(&event->lock);
 	}
 	kfree(temp);
@@ -523,6 +583,11 @@ int events_insert_completion(struct events *cmc, const char *buf,
 	strcpy(temp, buf);
 	while ((name = strsep(&temp, "&")) != NULL) {
 		event = events_search(cmc, name);
+		if (event == NULL) {
+			debug_message();
+			printk("DEREFERENCING event == NULL!!!\n");
+			continue;
+		}
 		mutex_lock(&event->lock);
 		rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
 		if (rt == -1) {
@@ -548,6 +613,7 @@ int events_insert_completion(struct events *cmc, const char *buf,
 	}
 	kfree(temp);
 	return 0;
+
 }
 
 int events_group_check_not_deadlock(struct events *cmc, const char *buf)
@@ -560,20 +626,21 @@ int events_group_check_not_deadlock(struct events *cmc, const char *buf)
 	if (temp == NULL)
 		return -ENOMEM;
 	strcpy(temp, buf);
-	debug_message();
 	while ((name = strsep(&temp, "&")) != NULL) {
 		debug_message();
 		event = events_search(cmc, name);
-		events_diagnose_event(event);
 		if (unlikely(event == NULL)) {
-			generate_oops();
+			debug_message();
+			kfree(temp);
 			return -EINVAL;
 		}
+		debug_message();
 		rt = events_check_not_deadlock(cmc, current_pid, event);
 		if (rt)
 			break;
 	}
 	kfree(temp);
+	rt = 1;
 	return rt;
 }	
 
@@ -600,8 +667,9 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 		rt = -ENOMEM;
 		goto ret;
 	}
+	printk(KERN_EMERG "buf = %s\n", buf);
 	rt = events_group_check_not_deadlock(cmc, buf);
-	if (!rt) {
+	if (rt <= 0) {
 		rt = -EDEADLK;
 		events_remove_completion(cmc, buf, completion);
 		while(spin_is_locked(&completion->wait.lock));
@@ -697,6 +765,7 @@ static struct events cmc = {
 static int __init events_init(void)
 {
 	int rt;
+	debug_message();
 	rt = alloc_chrdev_region(&cmc.dev, 0, 1, cmc.driver_name);
 	if (rt)
 		return rt;
@@ -746,7 +815,7 @@ void events_remove_at_exit(struct events *cmc, struct event *event)
 static void __exit events_exit(void)
 {
 	struct event *event = NULL, *temp = NULL;
-	down_write(&cmc.rw_lock);
+	debug_message();
 	device_destroy(cmc.class, cmc.dev);
 	cdev_del(cmc.cdev);
 	class_destroy(cmc.class);
@@ -755,7 +824,6 @@ static void __exit events_exit(void)
 		events_diagnose_event(event);
 		events_remove_at_exit(&cmc, event);
 	}
-	up_write(&cmc.rw_lock);
 }
 
 module_init(events_init);

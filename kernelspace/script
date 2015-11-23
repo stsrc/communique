@@ -4,4 +4,4 @@ clear
 make
 sudo rmmod events
 sudo insmod events.ko
-sudo chmod a+rwx /dev/events
+sudo chmod a+rw /dev/events
