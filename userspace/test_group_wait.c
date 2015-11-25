@@ -13,10 +13,10 @@ void proc2()
 {
 	int cnt = 0;
 	int rt;
-	char eventa[2] = "a\0";
-	char eventb[2] = "b\0";
-	char eventc[2] = "c\0";
-	char eventd[2] = "d\0";
+	char eventa[4] = "ab\0";
+	char eventb[4] = "bcd\0";
+	char eventc[4] = "cde\0";
+	char eventd[4] = "d\0";
 	char *events[] = {eventa, eventb, eventc, eventd};
 		while(cnt < 4) {
 			printf("proc2: event_wait\n");
@@ -32,10 +32,10 @@ void proc2()
 int main(void)
 {
 	int cnt = 0;
-	char eventa[2] = "a\0";
-	char eventb[2] = "b\0";
-	char eventc[2] = "c\0";
-	char eventd[2] = "d\0";
+	char eventa[4] = "ab\0";
+	char eventb[4] = "bcd\0";
+	char eventc[4] = "cde\0";
+	char eventd[4] = "d\0";
 	char *events[] = {eventa, eventb, eventc, eventd};
 	int rt;
 	pid_t pid;

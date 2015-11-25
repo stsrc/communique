@@ -35,7 +35,7 @@ MODULE_LICENSE("GPL");
 #define UNSETEVENT _IOW(0x8A, 0x04, char __user *)
 #define WEITINGROUP _IOW(0x8A, 0x05, char __user *)
 
-uint8_t glob_name_size = 2;
+uint8_t glob_name_size = 4;
 uint8_t glob_event_cnt_max = 5;
 uint8_t glob_compl_cnt_max = 5;
 uint8_t glob_proc = 5;
@@ -46,7 +46,6 @@ struct event {
 	int8_t s_comp;
 	int8_t g_comp;
 	struct list_head element;
-	struct mutex lock;
 	pid_t proc_throws[6]; //O really 6? not 5?
 	pid_t proc_waits[6];
 };
@@ -59,7 +58,7 @@ struct events {
 	struct file_operations fops;
 	struct device *device;
 	struct list_head event_list;
-	struct rw_semaphore rw_lock;
+	struct mutex lock;
 	uint8_t event_cnt;
 };
 
@@ -247,10 +246,8 @@ void events_delete_event(struct events *cmc, struct event *event)
 	cmc->event_cnt--;
 	kfree(event->name);
 	event->name = NULL;
-	while (spin_is_locked(&event->wait[0]->wait.lock));
 	kfree(event->wait[0]);
-	//rest?
-	mutex_unlock(&event->lock);
+	event->wait[0] = NULL;
 	kfree(event);
 }
 
@@ -258,8 +255,12 @@ int events_unset(struct events *cmc, const char __user *buf)
 {
 	int rt;
 	struct event *event;
+	rt = mutex_lock_interruptible(&cmc->lock);
+	if (rt)
+		return -EINTR;
 	event = events_get_event(cmc, buf);
 	if (unlikely(event == NULL)) {
+		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
 	rt = events_check_unset(event);
@@ -272,8 +273,10 @@ int events_unset(struct events *cmc, const char __user *buf)
 		goto ret;
 	}
 	events_delete_event(cmc, event);
+	mutex_unlock(&cmc->lock);
 	return 0;
 ret:
+	mutex_unlock(&cmc->lock);
 	return rt;
 }
 
@@ -292,7 +295,6 @@ static inline struct event* events_init_event(char *name)
 	events_add_pid(event->proc_throws, glob_proc, current->pid);
 	init_completion(event->wait[0]);
 	INIT_LIST_HEAD(&event->element);
-	mutex_init(&event->lock);
 	return event;
 }
 
@@ -300,14 +302,21 @@ int events_set(struct events *cmc, const char __user *buf)
 {
 	int rt;
 	struct event *event;
+	rt = mutex_lock_interruptible(&cmc->lock);
+	if (rt)
+		return -EINTR;
+
 	char *name = events_get_name(buf);
-	if (unlikely(name == NULL))
+	if (unlikely(name == NULL)) {
+		mutex_unlock(&cmc->lock);
 		return -EINVAL;
+	}
 	event = events_search(cmc, name);
 	if (event != NULL) {
 		rt = events_add_pid(event->proc_throws, glob_proc, current->pid);
 		if (rt)
 			rt = -EINVAL;
+		mutex_unlock(&cmc->lock);
 		kfree(name);
 		return rt;
 	}
@@ -318,9 +327,11 @@ int events_set(struct events *cmc, const char __user *buf)
 	if (event == NULL)
 		goto no_mem;
 	list_add(&event->element, &cmc->event_list);
+	mutex_unlock(&cmc->lock);
 	return 0;
 no_mem:
 	cmc->event_cnt--;
+	mutex_unlock(&cmc->lock);
 	kfree(name);
 	return -ENOMEM;
 }
@@ -329,17 +340,9 @@ struct event *events_check_if_proc_waits(struct events *cmc, pid_t pid)
 {
 	struct event *event = NULL;
 	list_for_each_entry(event, &cmc->event_list, element) {
-		if (event == NULL) {
-			debug_message();
-			printk("DEREFERENCING event == NULL!!!\n");
-			return NULL;
-		}
-		mutex_lock(&event->lock);
 		if (events_search_pid(event->proc_waits, glob_proc, pid) != -1) {
-			mutex_unlock(&event->lock);
 			return event;
 		}
-		mutex_unlock(&event->lock);
 	}
 	return NULL;	
 }
@@ -350,8 +353,6 @@ int events_check_not_deadlock(struct events *cmc, pid_t current_pid,
 	struct event *temp;
 	int rt;
 	pid_t pid_throwing;
-	if (event == NULL) 
-		return -EINVAL;
 	for (int i = 0; i < glob_proc; i++) {
 		pid_throwing = event->proc_throws[i];
 		if (pid_throwing == 0)
@@ -374,30 +375,113 @@ int events_check_not_deadlock(struct events *cmc, pid_t current_pid,
 
 int events_wait(struct events *cmc, const char __user *buf)
 {
-	int rt;
+	int rt = 0;
 	struct event *event;
+	rt = mutex_lock_interruptible(&cmc->lock);
+	if (rt)
+		return -EINTR;
 	event = events_get_event(cmc, buf);
 	if (unlikely(event == NULL)) {
-		up_read(&cmc->rw_lock);
+		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
 	if (!event->s_comp)
 		init_completion((struct completion *)event->wait[0]);
 	event->s_comp++;
 	rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
-	if (rt)
+	if (rt) {
+		mutex_unlock(&cmc->lock);
 		return -EINVAL;
+	}
 	rt = events_check_not_deadlock(cmc, current->pid, event);
-	if (!rt)
+	if (!rt) {
+		mutex_unlock(&cmc->lock);
 		return -EDEADLK;
+	}
+	mutex_unlock(&cmc->lock);
 	rt = wait_for_completion_interruptible(event->wait[0]);
+	rt = mutex_lock_interruptible(&cmc->lock);
+	if (rt)
+		rt = -EINTR;
 	event->s_comp--;
 	events_remove_pid(event->proc_waits, glob_proc, current->pid);
+	if (!rt)
+		mutex_unlock(&cmc->lock);
+	return rt;
+}
+
+struct wait_group {
+	int nbytes;
+	const char __user *buf;
+};	
+
+struct events_group {
+	int cnt;
+	char *ptr;
+	char *name_tab[10];
+};
+
+int events_del_group_struct(struct events_group *gr)
+{
+	if (gr->ptr != NULL) {
+		kfree(gr->ptr);
+		gr->ptr = NULL;
+	}
 	return 0;
 }
-	
+
+int events_parse_names(struct events *cmc, struct events_group *events_gr)
+{
+	char *name = NULL;
+	struct event *event;
+	while((name = strsep(&events_gr->ptr, "&")) != NULL) {
+		event = events_search(cmc, name);
+		if (event == NULL)
+			return 1;
+		if (events_gr->cnt > 9)
+			continue;
+		events_gr->name_tab[events_gr->cnt] = name;
+		printk("event_name = %s\n", 
+		       events_gr->name_tab[events_gr->cnt]);
+		events_gr->cnt++;
+	}
+	return 0;
+}
+
+int events_group_get_events(struct events *cmc, struct events_group *events_gr, 
+			    const char __user *user_buf)
+{
+	struct wait_group wait_group;
+	int rt;
+	rt = copy_from_user(&wait_group, user_buf, sizeof(struct wait_group));
+	if (rt)
+		return -EAGAIN;
+	events_gr->ptr = kmalloc(wait_group.nbytes, GFP_KERNEL);
+	if (events_gr->ptr == NULL)
+		return -ENOMEM;
+	memset(events_gr->ptr, 0, wait_group.nbytes);
+	rt = copy_from_user(events_gr->ptr, wait_group.buf, wait_group.nbytes);
+	if (rt) {
+		events_del_group_struct(events_gr);
+		return -EAGAIN;
+	}
+	rt = events_parse_names(cmc, events_gr);
+	if (rt) {
+		events_del_group_struct(events_gr);
+		return -EINVAL;
+	}
+	return 0;
+}
+
 int events_group_wait(struct events *cmc, const char __user *user_buf)
 {
+	struct events_group events_group;
+	int rt;
+	memset(&events_group, 0, sizeof(struct events_group));
+	rt = events_group_get_events(cmc, &events_group, user_buf);
+	if (rt)
+		return rt;
+	events_del_group_struct(&events_group);	
 	return 0;
 }
 
@@ -405,21 +489,29 @@ int events_throw(struct events *cmc, const char __user *buf)
 {
 	int rt;
 	struct event *event;
-	event = events_get_event(cmc, buf);
-	if (unlikely(event == NULL)) 
-		return -EINVAL;
-	if (rt < 0)
+	rt = mutex_lock_interruptible(&cmc->lock);
+	if (rt)
 		return -EINTR;
+
+	event = events_get_event(cmc, buf);
+	if (unlikely(event == NULL)) {
+		mutex_unlock(&cmc->lock);
+		return -EINVAL;
+	}
 	rt = events_search_pid(event->proc_throws, glob_proc, current->pid);
 	if (rt == -1) {
+		mutex_unlock(&cmc->lock);
 		return -EPERM;
 	}
-	if (!event->s_comp && !event->g_comp) 
+	if (!event->s_comp && !event->g_comp) {
+		mutex_unlock(&cmc->lock);
 		return 0;
+	}
 	if (event->s_comp)
 		complete_all(event->wait[0]);
 	for(int i = 1; i <= event->g_comp; i++)
 		complete_all(event->wait[i]);
+	mutex_unlock(&cmc->lock);
 	return 0;
 }
 
@@ -452,19 +544,20 @@ static struct events cmc = {
 	.cdev = NULL,
 	.dev = 0,
 	.class = NULL,
-	.fops = {.open = events_open,
+	.fops = {.owner = THIS_MODULE,
+		 .open = events_open,
 		 .release = events_release,
 		 .unlocked_ioctl = events_ioctl
 		},
 	.device = NULL,
-	.event_list = LIST_HEAD_INIT(cmc.event_list),
-	.rw_lock = __RWSEM_INITIALIZER(cmc.rw_lock)
+	.event_list = LIST_HEAD_INIT(cmc.event_list)
 };
 
 static int __init events_init(void)
 {
 	int rt;
 	debug_message();
+	mutex_init(&cmc.lock);
 	rt = alloc_chrdev_region(&cmc.dev, 0, 1, cmc.driver_name);
 	if (rt)
 		return rt;
@@ -507,8 +600,17 @@ err:
 
 void events_remove_at_exit(struct events *cmc, struct event *event)
 {
-	//i dont know
 	cmc->event_cnt--;
+	list_del(&event->element);
+	kfree(event->name);
+	event->name = NULL;
+	for (int i = 0; i < glob_compl_cnt_max; i++) {
+		if (event->wait[i] != NULL) {
+			kfree(event->wait[i]);
+			event->wait[i] = NULL;
+		}
+	}
+	kfree(event);
 }
 
 static void __exit events_exit(void)
@@ -519,10 +621,12 @@ static void __exit events_exit(void)
 	cdev_del(cmc.cdev);
 	class_destroy(cmc.class);
 	unregister_chrdev_region(cmc.dev, 1);
+	mutex_lock_interruptible(&cmc.lock);
 	list_for_each_entry_safe(event, temp, &cmc.event_list, element) {
 		events_diagnose_event(event);
 		events_remove_at_exit(&cmc, event);
-	}
+	}	
+	mutex_unlock(&cmc.lock);
 }
 
 module_init(events_init);
