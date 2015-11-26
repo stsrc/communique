@@ -40,6 +40,10 @@ uint8_t glob_event_cnt_max = 5;
 uint8_t glob_compl_cnt_max = 5;
 uint8_t glob_proc = 5;
 
+/* TODO:
+ * handling interrupt conditions
+ */
+
 struct event {
 	char *name;
 	struct completion *wait[6];
@@ -63,7 +67,7 @@ struct events {
 };
 
 static struct events cmc;
-struct completion *events_new_completion(void);
+struct event *events_check_if_proc_waits(struct events *cmc, pid_t pid);
 
 static inline void generate_oops(void)
 {
@@ -107,7 +111,6 @@ int events_open(struct inode *inode, struct file *file)
  * TODO:
  * -semaphores
  * -group_wait
- * -anti-deadlock for group_wait
  */
 
 /*
@@ -228,16 +231,46 @@ struct event *events_get_event(struct events*cmc, const char __user *buf)
 	return event;
 }
 
-static inline int events_check_unset(struct event *event)
+int events_unset_check_if_all_waits(struct events *cmc, pid_t *proc_throws)
+{
+	struct event *temp;
+	for (int i = 0; i < glob_proc; i++) {
+		if (proc_throws[i] == 0)
+			continue;
+		else if (proc_throws[i] == current->pid)
+			continue;
+		temp = events_check_if_proc_waits(cmc, proc_throws[i]);
+		if (temp == NULL)
+			return 0;
+	}
+	return 1;
+}
+
+int events_unset_check_deadlock(struct events *cmc, struct event *event)
 {
 	int rt;
-	if (event->s_comp || event->g_comp)	
+	if (!event->s_comp)
+		return 0;
+	if (event->wait[0]->done)
 		return -EAGAIN;
+	rt = events_unset_check_if_all_waits(cmc, event->proc_throws);
+	if (rt)
+		return -EDEADLK;	
+	return 0;
+}
+
+static inline int events_unset_check(struct events *cmc, struct event *event)
+{
+	int rt;
 	rt = events_search_pid(event->proc_throws, glob_proc, current->pid);
 	if (rt == -1)
 		return -EACCES;
-	rt = 0;
-	return rt;
+	rt = events_unset_check_deadlock(cmc, event);
+	if (rt)
+		return rt;
+	if (event->g_comp)	
+		return -EAGAIN;
+	return 0;
 }
 
 void events_delete_event(struct events *cmc, struct event *event)
@@ -263,7 +296,7 @@ int events_unset(struct events *cmc, const char __user *buf)
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
-	rt = events_check_unset(event);
+	rt = events_unset_check(cmc, event);
 	if (rt < 0)
 		goto ret;
 	events_remove_pid(event->proc_throws, glob_proc, current->pid);
@@ -305,7 +338,6 @@ int events_set(struct events *cmc, const char __user *buf)
 	rt = mutex_lock_interruptible(&cmc->lock);
 	if (rt)
 		return -EINTR;
-
 	char *name = events_get_name(buf);
 	if (unlikely(name == NULL)) {
 		mutex_unlock(&cmc->lock);
@@ -435,6 +467,22 @@ int events_del_group_struct(struct events_group *gr)
 	return 0;
 }
 
+int events_group_check_not_deadlock(struct events *cmc, 
+				    struct events_group *gr)
+{
+	int rt;
+	struct event *event;
+	for (int i = 0; i < gr->cnt; i++) {
+		event = events_search(cmc, gr->name_tab[i]);
+		if (event == NULL)
+			return -EINVAL;
+		rt = events_check_not_deadlock(cmc, current->pid, event);
+		if (rt)
+			return rt;
+	}
+	return 0;
+}
+
 int events_parse_names(struct events *cmc, struct events_group *events_gr)
 {
 	char *name = NULL;
@@ -443,7 +491,7 @@ int events_parse_names(struct events *cmc, struct events_group *events_gr)
 		event = events_search(cmc, name);
 		if (event == NULL)
 			return 1;
-		if (events_gr->cnt > 9)
+		if (events_gr->cnt > 9) //TODO
 			continue;
 		events_gr->name_tab[events_gr->cnt] = name;
 		printk("event_name = %s\n", 
@@ -487,16 +535,12 @@ int events_remove_group(struct events *cmc, struct events_group *gr)
 {
 	struct event *event;
 	int rt;
-	debug_message();
 	for (int i = 0; i < gr->cnt; i++) {
 		event = events_search(cmc, gr->name_tab[i]);
 		if (event == NULL)
 			continue;
-		events_diagnose_event(event);
-		debug_message();
 		rt = events_remove_pid(event->proc_waits, glob_proc, 
 				       current->pid);
-		debug_message();
 		if (rt == -1)
 			continue;
 		rt = events_remove_compl(event->wait, glob_compl_cnt_max,
@@ -504,8 +548,10 @@ int events_remove_group(struct events *cmc, struct events_group *gr)
 		if (rt == -1)
 			continue;
 		event->g_comp--;
-		if (event->g_comp < 0)
+		if (event->g_comp < 0) {
+			generate_oops();
 			debug_message();
+		}
 	}
 	return 0;
 }
@@ -514,23 +560,17 @@ int events_insert_group(struct events *cmc, struct events_group *gr)
 {
 	struct event *event;
 	int rt;
-	debug_message();
 	for (int i = 0; i < gr->cnt; i++) {
 		event = events_search(cmc, gr->name_tab[i]);
 		if (event == NULL) {
 			events_remove_group(cmc, gr);
-			debug_message();
 			return -EINVAL;
 		}
-		events_diagnose_event(event);
-		debug_message();
 		rt = events_add_pid(event->proc_waits, glob_proc, current->pid);	
 		if (rt) {
 			events_remove_group(cmc, gr);
-			debug_message();
 			return -EINVAL;
 		}
-		debug_message();
 		if (event->g_comp + 1 >= glob_compl_cnt_max) {
 			events_remove_group(cmc, gr);
 			return -ENOMEM;
@@ -564,14 +604,19 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	rt = events_insert_group(cmc, &events_group);
 	if (rt)
 		goto ret;
-	//mutex_unlock(&cmc->lock);
-	//rt = wait_for_completion_interruptible(events_group.comp);
-	//if (rt)
-	//	return -EINTR;
-	//mutex_lock(&cmc->lock);
+	rt = events_group_check_not_deadlock(cmc, &events_group);
+	if (rt != 1) {
+		rt = -EDEADLK;
+		events_remove_group(cmc, &events_group);
+		goto ret;
+	}
+	mutex_unlock(&cmc->lock);
+	rt = wait_for_completion_interruptible(events_group.comp);
+	if (rt)
+		return -EINTR;
+	mutex_lock(&cmc->lock);
 	events_remove_group(cmc, &events_group);
 	rt = 0;
-	goto ret;
 ret:
 	events_del_group_struct(&events_group);
 	mutex_unlock(&cmc->lock);

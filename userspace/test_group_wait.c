@@ -25,7 +25,7 @@ void proc2()
 			event_check_error_exit(rt, "proc2: event_wait FAILS!");
 			cnt++;
 		}
-		printf("proc2: killed\n");
+		printf("proc2: returning\n");
 		exit(0);
 }
 
@@ -56,7 +56,7 @@ int main(void)
 	default:
 		sleep(1);
 		while(cnt < 4) {
-			sleep(2);
+			sleep(1);
 			printf("proc1: event_throw, event %s\n", events[cnt]);
 			rt = event_throw(events[cnt]);
 			event_check_error_exit(rt, "proc2: event_throw FAILS!");
@@ -71,7 +71,7 @@ int main(void)
 		event_check_error(rt, "proc1: event_unset event2");
 		rt = event_unset(events[3]);
 		event_check_error(rt, "proc1: event_unset event3");
-		printf("proc1: exiting\n");
+		printf("proc1: returning\n");
 		exit(0);
 	}
 	return 0;

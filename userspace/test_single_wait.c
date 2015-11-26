@@ -12,7 +12,7 @@ void proc1(char *event)
 	int cnt = 0;
 	int rt = 0;
 	while(cnt < 4) {
-		sleep(3);
+		sleep(1);
 		printf("proc1 - throws event.\n");
 		rt = event_throw(event);
 		if (rt == 1)
@@ -20,6 +20,7 @@ void proc1(char *event)
 		event_check_error(rt, "proc1 - event_throw");
 		cnt++;
 	}
+	printf("proc1 - event unset\n");
 	rt = event_unset(event);
 	event_check_error_exit(rt, "proc1 - event_unset");
 	exit(0);
