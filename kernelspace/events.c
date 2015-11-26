@@ -202,7 +202,7 @@ ssize_t events_remove_compl(struct completion **arr, ssize_t size,
 	i = events_search_compl(arr, size, compl);
 	if (i == -1)
 		return -1;
-	arr[i] = 0;
+	arr[i] = NULL;
 	return 0;
 }
 
@@ -417,15 +417,20 @@ struct wait_group {
 
 struct events_group {
 	int cnt;
-	char *ptr;
+	struct completion *comp;
+	char *names;
 	char *name_tab[10];
 };
 
 int events_del_group_struct(struct events_group *gr)
 {
-	if (gr->ptr != NULL) {
-		kfree(gr->ptr);
-		gr->ptr = NULL;
+	if (gr->names != NULL) {
+		kfree(gr->names);
+		gr->names = NULL;
+	}
+	if (gr->comp != NULL) {
+		kfree(gr->comp);
+		gr->comp = NULL;
 	}
 	return 0;
 }
@@ -434,7 +439,7 @@ int events_parse_names(struct events *cmc, struct events_group *events_gr)
 {
 	char *name = NULL;
 	struct event *event;
-	while((name = strsep(&events_gr->ptr, "&")) != NULL) {
+	while((name = strsep(&events_gr->names, "&")) != NULL) {
 		event = events_search(cmc, name);
 		if (event == NULL)
 			return 1;
@@ -456,19 +461,88 @@ int events_group_get_events(struct events *cmc, struct events_group *events_gr,
 	rt = copy_from_user(&wait_group, user_buf, sizeof(struct wait_group));
 	if (rt)
 		return -EAGAIN;
-	events_gr->ptr = kmalloc(wait_group.nbytes, GFP_KERNEL);
-	if (events_gr->ptr == NULL)
+	events_gr->names = kmalloc(wait_group.nbytes, GFP_KERNEL);
+	if (events_gr->names == NULL)
 		return -ENOMEM;
-	memset(events_gr->ptr, 0, wait_group.nbytes);
-	rt = copy_from_user(events_gr->ptr, wait_group.buf, wait_group.nbytes);
-	if (rt) {
-		events_del_group_struct(events_gr);
+	memset(events_gr->names, 0, wait_group.nbytes);
+	rt = copy_from_user(events_gr->names, wait_group.buf, wait_group.nbytes);
+	if (rt)
 		return -EAGAIN;
-	}
 	rt = events_parse_names(cmc, events_gr);
-	if (rt) {
-		events_del_group_struct(events_gr);
+	if (rt)
 		return -EINVAL;
+	return 0;
+}
+
+int events_init_completion(struct events_group *gr)
+{
+	gr->comp = kmalloc(sizeof(struct completion), GFP_KERNEL);
+	if (gr->comp == NULL)
+		return -ENOMEM;
+	init_completion(gr->comp);
+	return 0;	
+}
+
+int events_remove_group(struct events *cmc, struct events_group *gr)
+{
+	struct event *event;
+	int rt;
+	debug_message();
+	for (int i = 0; i < gr->cnt; i++) {
+		event = events_search(cmc, gr->name_tab[i]);
+		if (event == NULL)
+			continue;
+		events_diagnose_event(event);
+		debug_message();
+		rt = events_remove_pid(event->proc_waits, glob_proc, 
+				       current->pid);
+		debug_message();
+		if (rt == -1)
+			continue;
+		rt = events_remove_compl(event->wait, glob_compl_cnt_max,
+				    gr->comp);
+		if (rt == -1)
+			continue;
+		event->g_comp--;
+		if (event->g_comp < 0)
+			debug_message();
+	}
+	return 0;
+}
+
+int events_insert_group(struct events *cmc, struct events_group *gr)
+{
+	struct event *event;
+	int rt;
+	debug_message();
+	for (int i = 0; i < gr->cnt; i++) {
+		event = events_search(cmc, gr->name_tab[i]);
+		if (event == NULL) {
+			events_remove_group(cmc, gr);
+			debug_message();
+			return -EINVAL;
+		}
+		events_diagnose_event(event);
+		debug_message();
+		rt = events_add_pid(event->proc_waits, glob_proc, current->pid);	
+		if (rt) {
+			events_remove_group(cmc, gr);
+			debug_message();
+			return -EINVAL;
+		}
+		debug_message();
+		if (event->g_comp + 1 >= glob_compl_cnt_max) {
+			events_remove_group(cmc, gr);
+			return -ENOMEM;
+		}
+		event->g_comp++;
+		rt = events_add_compl(event->wait, glob_compl_cnt_max, 
+				      gr->comp);
+		if (rt) {
+			event->g_comp--;
+			events_remove_group(cmc, gr);
+			return -ENOMEM;
+		}
 	}
 	return 0;
 }
@@ -478,11 +552,30 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	struct events_group events_group;
 	int rt;
 	memset(&events_group, 0, sizeof(struct events_group));
+	rt = mutex_lock_interruptible(&cmc->lock);
+	if (rt)
+		return -EINTR;
 	rt = events_group_get_events(cmc, &events_group, user_buf);
 	if (rt)
-		return rt;
-	events_del_group_struct(&events_group);	
-	return 0;
+		goto ret;
+	rt = events_init_completion(&events_group);
+	if (rt)
+		goto ret;
+	rt = events_insert_group(cmc, &events_group);
+	if (rt)
+		goto ret;
+	//mutex_unlock(&cmc->lock);
+	//rt = wait_for_completion_interruptible(events_group.comp);
+	//if (rt)
+	//	return -EINTR;
+	//mutex_lock(&cmc->lock);
+	events_remove_group(cmc, &events_group);
+	rt = 0;
+	goto ret;
+ret:
+	events_del_group_struct(&events_group);
+	mutex_unlock(&cmc->lock);
+	return rt;
 }
 
 int events_throw(struct events *cmc, const char __user *buf)
@@ -509,8 +602,12 @@ int events_throw(struct events *cmc, const char __user *buf)
 	}
 	if (event->s_comp)
 		complete_all(event->wait[0]);
-	for(int i = 1; i <= event->g_comp; i++)
-		complete_all(event->wait[i]);
+	if (event->g_comp) {
+		for(int i = 1; i < glob_compl_cnt_max; i++) {
+			if (event->wait[i] != NULL) 
+				complete_all(event->wait[i]);
+		}
+	}
 	mutex_unlock(&cmc->lock);
 	return 0;
 }
