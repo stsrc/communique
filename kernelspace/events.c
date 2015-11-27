@@ -855,8 +855,7 @@ static void __exit events_exit(void)
 		events_diagnose_event(event);
 		events_remove_at_exit(&cmc, event);
 	}
-	printk("cmc.kmalloc_cnt = %d\n", cmc.kmalloc_cnt);
-	if (cmc.kmalloc_cnt) {
+	if (cmc.kmalloc_cnt) {//MEMORY LEAK!!!
 		debug_message();
 		generate_oops();
 		debug_message();	
