@@ -43,6 +43,7 @@ void proc1()
 	printf("10. proc1 - event_unset\n");
 	rt = event_unset(eventa);
 	event_check_error_exit(rt, "proc1 - event_unset, FAILED - SHOULD NOT FAIL!");
+	printf("proc1 - exit(0)\n");
 	exit(0);
 }
 
@@ -54,7 +55,7 @@ void proc2()
 	printf("2. proc2 - event_wait\n");
 	rt = event_wait(eventa);
 	event_check_error_exit(rt, "proc2 - event_wait, FAILED - SHOULD NOT FAIL!");
-	printf("11. proc2 - dead\n");
+	printf("proc2 - exit(0)\n");
 	exit(0);	
 }
 
@@ -81,6 +82,7 @@ void proc3()
 	event_check_error_exit(rt, "proc3 - event_unset, FAILED - SHOULD NOT FAIL!");
 	rt = event_unset(eventb);
 	event_check_error_exit(rt, "proc3 - event_unset, FAILED - SHOULD NOT FAIL!");
+	printf("proc3 - exit(0)\n");
 	exit(0);
 }
 
