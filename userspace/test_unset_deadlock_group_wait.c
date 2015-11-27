@@ -7,7 +7,7 @@
  * TEST SCENARIO:
  * proc1 waits for one of the four events: a, b, c, d
  * proc2 waits for one of the three events: a, b, d
- * proc3 just throws. Firstly throws event c, then throws event a.
+ * proc3 tries to unset event c. Then throws c throws, and after a while throws event a.
  */
 
 void proc1(char **events)
@@ -68,9 +68,15 @@ void proc3(char **events)
 	rt = event_set(events[3]);
 	event_check_error_exit(rt, "proc3: event_set");	
 	sleep(5); //assurance of waiting proc1
+	printf("proc3: event_unset. should fail\n");
+	rt = event_unset(events[2]);
+	event_check_error(rt, "proc3: event_unset. Positive fail\n");
 	printf("proc3: event_throw.\n");
 	rt = event_throw(events[2]);
 	event_check_error_exit(rt, "proc3: event_throw");
+	printf("proc3: event_unset\n");
+	rt = event_unset(events[2]);
+	event_check_error_exit(rt, "proc3: event_unset");
 	sleep(1); 
 	printf("proc3: event_throw.\n");
 	rt = event_throw(events[0]);
@@ -78,8 +84,6 @@ void proc3(char **events)
 	rt = event_unset(events[0]);
 	event_check_error_exit(rt, "proc3: event_unset");
 	rt = event_unset(events[1]);
-	event_check_error_exit(rt, "proc3: event_unset");
-	rt = event_unset(events[2]);
 	event_check_error_exit(rt, "proc3: event_unset");
 	rt = event_unset(events[3]);
 	event_check_error_exit(rt, "proc3: event_unset");

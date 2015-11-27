@@ -63,7 +63,7 @@ struct events {
 	struct device *device;
 	struct list_head event_list;
 	struct mutex lock;
-	uint8_t event_cnt;
+	int8_t event_cnt;
 };
 
 static struct events cmc;
@@ -249,13 +249,28 @@ int events_unset_check_if_all_waits(struct events *cmc, pid_t *proc_throws)
 int events_unset_check_deadlock(struct events *cmc, struct event *event)
 {
 	int rt;
-	if (!event->s_comp)
+	struct completion *temp;
+	if (!(event->s_comp || event->g_comp))
 		return 0;
-	if (event->wait[0]->done)
+	if (event->s_comp) {
+		if (event->wait[0]->done)
+			return -EAGAIN;
+		rt = events_unset_check_if_all_waits(cmc, event->proc_throws);
+		if (rt)
+			return -EDEADLK;
+	} else if (event->g_comp) {
+		for (int i = 1; i < glob_compl_cnt_max; i++) {
+			temp = event->wait[i];
+			if (temp == NULL)
+				continue;
+			else if (temp->done)
+				return -EAGAIN;
+		}
+		rt = events_unset_check_if_all_waits(cmc, event->proc_throws);
+		if (rt)
+			return -EDEADLK;
 		return -EAGAIN;
-	rt = events_unset_check_if_all_waits(cmc, event->proc_throws);
-	if (rt)
-		return -EDEADLK;	
+	}
 	return 0;
 }
 
@@ -266,17 +281,17 @@ static inline int events_unset_check(struct events *cmc, struct event *event)
 	if (rt == -1)
 		return -EACCES;
 	rt = events_unset_check_deadlock(cmc, event);
-	if (rt)
-		return rt;
-	if (event->g_comp)	
-		return -EAGAIN;
-	return 0;
+	return rt;
 }
 
 void events_delete_event(struct events *cmc, struct event *event)
 {
 	list_del(&event->element);
 	cmc->event_cnt--;
+	if (cmc->event_cnt < 0) {
+		generate_oops();
+		debug_message();
+	}
 	kfree(event->name);
 	event->name = NULL;
 	kfree(event->wait[0]);
@@ -292,7 +307,7 @@ int events_unset(struct events *cmc, const char __user *buf)
 	if (rt)
 		return -EINTR;
 	event = events_get_event(cmc, buf);
-	if (unlikely(event == NULL)) {
+	if (event == NULL) {
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
@@ -301,8 +316,11 @@ int events_unset(struct events *cmc, const char __user *buf)
 		goto ret;
 	events_remove_pid(event->proc_throws, glob_proc, current->pid);
 	rt = events_non_zero_pid(event->proc_throws, glob_proc);
-	if (rt) {
+	if (rt > 0) {
 		rt = 0;
+		goto ret;
+	} else if (rt < 0) {
+		rt = -EINVAL;
 		goto ret;
 	}
 	events_delete_event(cmc, event);
@@ -494,8 +512,6 @@ int events_parse_names(struct events *cmc, struct events_group *events_gr)
 		if (events_gr->cnt > 9) //TODO
 			continue;
 		events_gr->name_tab[events_gr->cnt] = name;
-		printk("event_name = %s\n", 
-		       events_gr->name_tab[events_gr->cnt]);
 		events_gr->cnt++;
 	}
 	return 0;
@@ -549,8 +565,8 @@ int events_remove_group(struct events *cmc, struct events_group *gr)
 			continue;
 		event->g_comp--;
 		if (event->g_comp < 0) {
-			generate_oops();
 			debug_message();
+			generate_oops();
 		}
 	}
 	return 0;
@@ -743,6 +759,10 @@ err:
 void events_remove_at_exit(struct events *cmc, struct event *event)
 {
 	cmc->event_cnt--;
+	if (cmc->event_cnt < 0) {
+		debug_message();
+		generate_oops();
+	}
 	list_del(&event->element);
 	kfree(event->name);
 	event->name = NULL;
