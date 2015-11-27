@@ -218,6 +218,7 @@ ssize_t events_remove_compl(struct completion **arr, ssize_t size,
 
 struct event *events_search(struct events *cmc, const char *name)
 {
+	int rt;
 	struct event *event = NULL;
 	list_for_each_entry(event, &cmc->event_list, element) {
 		if (strncmp(event->name, name, strlen(name)) == 0) {
@@ -229,6 +230,7 @@ struct event *events_search(struct events *cmc, const char *name)
 
 struct event *events_get_event(struct events *cmc, const char __user *buf)
 {
+	int rt;
 	struct event *event;
 	char *name = events_get_name(buf);
         if (unlikely(name == NULL))
@@ -398,6 +400,34 @@ err:
 	return NULL;
 }
 
+int events_remove_abandonment(struct event *event)
+{
+	int rt;
+	struct task_struct *task;
+	for (unsigned int i = 0; i < glob_proc; i++) {
+		task = event->proc_throws[i];
+		if (task == NULL)
+			continue;
+		else if (task == current)
+			continue;
+		rt = pid_alive(task);
+		if (!rt)
+			events_remove_task(event->proc_throws, glob_proc, task);
+	}
+	rt = events_non_zero_task(event->proc_throws, glob_proc);
+	if (rt == 0)
+		return -EINVAL;
+	else
+		return 0;
+}
+
+void events_clean_event(struct event *event)
+{
+	int rt = events_remove_abandonment(event);
+	if (rt == -EINVAL)
+		reinit_completion(event->wait[0]);
+}
+
 int events_set(struct events *cmc, const char __user *buf)
 {
 	int rt;
@@ -412,6 +442,7 @@ int events_set(struct events *cmc, const char __user *buf)
 	}
 	event = events_search(cmc, name);
 	if (event != NULL) {
+		events_clean_event(event);
 		rt = events_add_task(event->proc_throws, glob_proc, current);
 		if (rt == -2)		//TODO
 			rt = -ENOMEM;
@@ -508,13 +539,10 @@ int events_wait(struct events *cmc, const char __user *buf)
 		return -EDEADLK;
 	}
 	mutex_unlock(&cmc->lock);
-	printk(KERN_EMERG "&event->wait[0] = %lu\n", (unsigned long)&event->wait[0]);
 	rt = wait_for_completion_interruptible(event->wait[0]);
 	if (rt)
-		return -EINTR;
-	rt = mutex_lock_interruptible(&cmc->lock);
-	if (rt)
-		return -EINTR;
+		rt = -EINTR;
+	mutex_lock(&cmc->lock);
 	if (!event->s_comp) {
 		debug_message();
 		generate_oops();
@@ -710,10 +738,8 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	mutex_unlock(&cmc->lock);
 	rt = wait_for_completion_interruptible(events_group.comp);
 	if (rt)
-		return -EINTR;
-	rt = mutex_lock_interruptible(&cmc->lock);
-	if (rt)
-		return -EINTR;
+		rt = -EINTR;
+	mutex_lock(&cmc->lock);
 	events_remove_group(cmc, &events_group);
 	rt = 0;
 ret:
@@ -744,7 +770,6 @@ int events_throw(struct events *cmc, const char __user *buf)
 		mutex_unlock(&cmc->lock);
 		return 0;
 	}
-	printk(KERN_EMERG "&event->wait[0] = %lu\n", (unsigned long)&event->wait[0]);
 	if (event->s_comp)
 		complete_all(event->wait[0]);
 	if (event->g_comp) {
