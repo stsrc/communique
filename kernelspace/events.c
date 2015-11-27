@@ -412,15 +412,13 @@ int events_remove_abandonment(struct event *event)
 		task = event->proc_throws[i];
 		if (task == NULL)
 			continue;
-		else if (task == current)
-			continue;
 		rt = pid_alive(task);
 		if (!rt)
 			events_remove_task(event->proc_throws, glob_proc, task);
 	}
 	rt = events_non_zero_task(event->proc_throws, glob_proc);
 	if (rt == 0)
-		return -EINVAL;
+		return -1;
 	else
 		return 0;
 }
@@ -428,7 +426,7 @@ int events_remove_abandonment(struct event *event)
 void events_clean_event(struct event *event)
 {
 	int rt = events_remove_abandonment(event);
-	if (rt == -EINVAL)
+	if (rt < 0)
 		reinit_completion(event->wait[0]);
 }
 
@@ -446,8 +444,9 @@ int events_set(struct events *cmc, const char __user *buf)
 	}
 	event = events_search(cmc, name);
 	if (event != NULL) {
+		events_diagnose_event(event);
 		events_clean_event(event);
-		debug_message();
+		events_diagnose_event(event);
 		rt = events_add_task(event->proc_throws, glob_proc, current);
 		if (rt == -2)		//TODO
 			rt = -ENOMEM;
