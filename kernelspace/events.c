@@ -831,7 +831,6 @@ err:
 
 void events_remove_at_exit(struct events *cmc, struct event *event)
 {
-	int ;
 	if (!cmc->event_cnt) {
 		generate_oops();
 		debug_message();
