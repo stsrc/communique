@@ -497,6 +497,7 @@ int events_wait(struct events *cmc, const char __user *buf)
 		return -EDEADLK;
 	}
 	mutex_unlock(&cmc->lock);
+	printk(KERN_EMERG "&event->wait[0] = %lu\n", (unsigned long)&event->wait[0]);
 	rt = wait_for_completion_interruptible(event->wait[0]);
 	if (rt)
 		return -EINTR;
@@ -733,6 +734,7 @@ int events_throw(struct events *cmc, const char __user *buf)
 		mutex_unlock(&cmc->lock);
 		return 0;
 	}
+	printk(KERN_EMERG "&event->wait[0] = %lu\n", (unsigned long)&event->wait[0]);
 	if (event->s_comp)
 		complete_all(event->wait[0]);
 	if (event->g_comp) {
