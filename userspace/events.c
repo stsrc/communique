@@ -31,6 +31,10 @@ int event_unset(char *name)
 	if (fd < 0)
 		return 1;
 	rt = ioctl(fd, UNSETEVENT, name);
+	while (rt && (errno == EAGAIN)) {
+		sleep(1);
+		rt = ioctl(fd, UNSETEVENT, name);
+	}
 	close(fd);
 	if (rt)
 		return 1;
