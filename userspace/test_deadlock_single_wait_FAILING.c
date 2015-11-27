@@ -1,7 +1,12 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "events.h"
-
+/*
+ * TEST SCENARIO:
+ * proc2 throws b, waits first for a
+ * proc3 throws c, waits second for b
+ * proc1 throws a, tries to wait for c
+ */
 void proc2(char **events)
 {
 	int rt;
@@ -56,5 +61,5 @@ int main(void)
 	printf("proc1 - event_wait - should fail\n");
 	rt = event_wait(events[2]);
 	event_check_error_exit(rt, "proc1 - event_wait SHOULD FAIL!");
-	printf("PROC3 NO FAILURE - WHOOOP WHOOP ITS WRONG\n");
+	printf("PROC3 NO FAILURE - WRONG\n");
 }

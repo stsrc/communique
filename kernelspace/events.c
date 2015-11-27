@@ -90,16 +90,22 @@ void events_diagnose_event(struct event *event)
 	printk(KERN_EMERG "name: %s\n", event->name);
 	printk(KERN_EMERG "unsigned int s_comp: %u\n", event->s_comp);
 	printk(KERN_EMERG "unsigned int g_comp: %d\n", event->g_comp);
+	printk(KERN_EMERG "struct completion **wait: %lu\n",
+	       (unsigned long)event->wait);
 	for (unsigned int i = 0; i < glob_compl_cnt_max; i++) {
 		printk(KERN_EMERG "struct completion *wait[%d]: %lu\n",
 		       i, (unsigned long)event->wait[i]);
 	}
+	printk(KERN_EMERG "struct task_struct **proc_throws: %lu\n",
+	       (unsigned long)event->proc_throws);
 	for(unsigned int i = 0; i < glob_proc; i++) {
-		printk(KERN_EMERG "struct task_struct proc_throws[%d]: %lu\n",
+		printk(KERN_EMERG "struct task_struct *proc_throws[%d]: %lu\n",
 		       i, (unsigned long)event->proc_throws[i]);
 	}
+	printk(KERN_EMERG "struct task_struct **proc_waits: %lu\n",
+	       (unsigned long)event->proc_waits);
 	for(unsigned int i = 0; i < glob_proc; i++) {
-		printk(KERN_EMERG "struct task_struct proc_waits[%d]: %lu\n",
+		printk(KERN_EMERG "struct task_struct *proc_waits[%d]: %lu\n",
 		       i, (unsigned long)event->proc_waits[i]);
 	}
 }
@@ -218,7 +224,6 @@ ssize_t events_remove_compl(struct completion **arr, ssize_t size,
 
 struct event *events_search(struct events *cmc, const char *name)
 {
-	int rt;
 	struct event *event = NULL;
 	list_for_each_entry(event, &cmc->event_list, element) {
 		if (strncmp(event->name, name, strlen(name)) == 0) {
@@ -230,7 +235,6 @@ struct event *events_search(struct events *cmc, const char *name)
 
 struct event *events_get_event(struct events *cmc, const char __user *buf)
 {
-	int rt;
 	struct event *event;
 	char *name = events_get_name(buf);
         if (unlikely(name == NULL))
@@ -443,11 +447,13 @@ int events_set(struct events *cmc, const char __user *buf)
 	event = events_search(cmc, name);
 	if (event != NULL) {
 		events_clean_event(event);
+		debug_message();
 		rt = events_add_task(event->proc_throws, glob_proc, current);
 		if (rt == -2)		//TODO
 			rt = -ENOMEM;
 		else if (rt == -1)
 			rt = -EINVAL;
+		debug_message();
 		mutex_unlock(&cmc->lock);
 		kfree(name);
 		cmc->kmalloc_cnt--;
@@ -535,6 +541,8 @@ int events_wait(struct events *cmc, const char __user *buf)
 	}
 	rt = events_check_not_deadlock(cmc, current, event);
 	if (!rt) {
+		event->s_comp--;
+		events_remove_task(event->proc_waits, glob_proc, current);
 		mutex_unlock(&cmc->lock);
 		return -EDEADLK;
 	}
@@ -868,10 +876,8 @@ err:
 
 void events_remove_at_exit(struct events *cmc, struct event *event)
 {
-	if (!cmc->event_cnt) {
-		generate_oops();
+	if (!cmc->event_cnt) 
 		debug_message();
-	}
 	cmc->event_cnt--;
 	list_del(&event->element);
 	kfree(event->name);
