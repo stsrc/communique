@@ -70,7 +70,7 @@ void proc3(char **events)
 	sleep(5); //assurance of waiting proc1
 	printf("proc3: event_unset. should fail\n");
 	rt = event_unset(events[2]);
-	event_check_error(rt, "proc3: event_unset. Positive fail\n");
+	event_check_error(rt, "proc3: event_unset. Positive fail");
 	printf("proc3: event_throw.\n");
 	rt = event_throw(events[2]);
 	event_check_error_exit(rt, "proc3: event_throw");

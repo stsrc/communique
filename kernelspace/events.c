@@ -46,12 +46,12 @@ uint8_t glob_proc = 5;
 
 struct event {
 	char *name;
-	struct completion *wait[6];
+	struct completion **wait;
 	int8_t s_comp;
 	int8_t g_comp;
 	struct list_head element;
-	pid_t proc_throws[6]; //O really 6? not 5?
-	pid_t proc_waits[6];
+	pid_t *proc_throws;
+	pid_t *proc_waits;
 };
 
 struct events {
@@ -64,6 +64,8 @@ struct events {
 	struct list_head event_list;
 	struct mutex lock;
 	int8_t event_cnt;
+
+	int kmalloc_cnt;
 };
 
 static struct events cmc;
@@ -121,12 +123,14 @@ char *events_get_name(const char __user *buf)
 {
 	int rt;
 	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
+	cmc.kmalloc_cnt++;
 	if (unlikely(name == NULL))
 		return NULL;
 	memset(name, 0, sizeof(char)*glob_name_size);
 	rt = copy_from_user(name, buf, glob_name_size - 1);
 	if (unlikely(rt)) {
 		kfree(name);
+		cmc.kmalloc_cnt--;
 		return NULL;
 	}
 	return name;	
@@ -220,7 +224,7 @@ struct event *events_search(struct events *cmc, const char *name)
 	return NULL;
 }
 
-struct event *events_get_event(struct events*cmc, const char __user *buf)
+struct event *events_get_event(struct events *cmc, const char __user *buf)
 {
 	struct event *event;
 	char *name = events_get_name(buf);
@@ -228,6 +232,7 @@ struct event *events_get_event(struct events*cmc, const char __user *buf)
 		return NULL;
 	event = events_search(cmc, name);
 	kfree(name);
+	cmc->kmalloc_cnt--;
 	return event;
 }
 
@@ -293,10 +298,22 @@ void events_delete_event(struct events *cmc, struct event *event)
 		debug_message();
 	}
 	kfree(event->name);
+	cmc->kmalloc_cnt--;
 	event->name = NULL;
 	kfree(event->wait[0]);
+	cmc->kmalloc_cnt--;
 	event->wait[0] = NULL;
+	kfree(event->wait);
+	cmc->kmalloc_cnt--;
+	event->wait = NULL;
+	kfree(event->proc_throws);
+	cmc->kmalloc_cnt--;
+	event->proc_throws = NULL;
+	kfree(event->proc_waits);
+	cmc->kmalloc_cnt--;
+	event->proc_waits = NULL;
 	kfree(event);
+	cmc->kmalloc_cnt--;
 }
 
 int events_unset(struct events *cmc, const char __user *buf)
@@ -334,19 +351,45 @@ ret:
 static inline struct event* events_init_event(char *name)
 {
 	struct event *event = kmalloc(sizeof(struct event), GFP_KERNEL);
+	cmc.kmalloc_cnt++;
 	if (unlikely(event == NULL))
 		return NULL;
 	memset(event, 0, sizeof(struct event));
 	event->name = name;
+	event->wait = kmalloc(sizeof(struct completion *)*glob_compl_cnt_max,
+			      GFP_KERNEL);
+	cmc.kmalloc_cnt++;
+	if (unlikely(event->wait == NULL))
+		goto err;
+	memset(event->wait, 0, sizeof(struct completion *)*glob_compl_cnt_max);
+	event->proc_throws = kmalloc(sizeof(pid_t)*glob_proc, GFP_KERNEL);
+	cmc.kmalloc_cnt++;
+	if (unlikely(event->proc_throws == NULL))
+		goto err;
+	memset(event->proc_throws, 0, sizeof(pid_t)*glob_proc);
+	event->proc_waits = kmalloc(sizeof(pid_t)*glob_proc, GFP_KERNEL);
+	cmc.kmalloc_cnt++;
+	if (unlikely(event->proc_waits == NULL))
+		goto err;
+	memset(event->proc_waits, 0, sizeof(pid_t)*glob_proc);
 	event->wait[0] = kmalloc(sizeof(struct completion), GFP_KERNEL);
-	if (unlikely(event->wait[0] == NULL)) {
-		kfree(event);
-		return NULL;
-	}
+	cmc.kmalloc_cnt++;
+	if (unlikely(event->wait[0] == NULL))
+		goto err;
 	events_add_pid(event->proc_throws, glob_proc, current->pid);
 	init_completion(event->wait[0]);
 	INIT_LIST_HEAD(&event->element);
 	return event;
+err:
+	kfree(event->wait);
+	cmc.kmalloc_cnt--;
+	kfree(event->proc_throws);
+	cmc.kmalloc_cnt--;
+	kfree(event->proc_waits);
+	cmc.kmalloc_cnt--;
+	kfree(event);
+	cmc.kmalloc_cnt--;
+	return NULL;
 }
 
 int events_set(struct events *cmc, const char __user *buf)
@@ -368,6 +411,7 @@ int events_set(struct events *cmc, const char __user *buf)
 			rt = -EINVAL;
 		mutex_unlock(&cmc->lock);
 		kfree(name);
+		cmc->kmalloc_cnt--;
 		return rt;
 	}
 	cmc->event_cnt++;
@@ -383,6 +427,7 @@ no_mem:
 	cmc->event_cnt--;
 	mutex_unlock(&cmc->lock);
 	kfree(name);
+	cmc->kmalloc_cnt--;
 	return -ENOMEM;
 }
 
@@ -469,20 +514,20 @@ struct events_group {
 	int cnt;
 	struct completion *comp;
 	char *names;
-	char *name_tab[10];
+	char **name_tab;
 };
 
-int events_del_group_struct(struct events_group *gr)
+void events_del_group_struct(struct events_group *gr)
 {
-	if (gr->names != NULL) {
-		kfree(gr->names);
-		gr->names = NULL;
-	}
-	if (gr->comp != NULL) {
-		kfree(gr->comp);
-		gr->comp = NULL;
-	}
-	return 0;
+	kfree(gr->names);
+	cmc.kmalloc_cnt--;
+	gr->names = NULL;
+	kfree(gr->comp);
+	cmc.kmalloc_cnt--;
+	gr->comp = NULL;
+	kfree(gr->name_tab);
+	cmc.kmalloc_cnt--;
+	gr->name_tab = NULL;
 }
 
 int events_group_check_not_deadlock(struct events *cmc, 
@@ -508,9 +553,9 @@ int events_parse_names(struct events *cmc, struct events_group *events_gr)
 	while((name = strsep(&events_gr->names, "&")) != NULL) {
 		event = events_search(cmc, name);
 		if (event == NULL)
-			return 1;
-		if (events_gr->cnt > 9) //TODO
-			continue;
+			return -EINVAL;
+		if (events_gr->cnt >= glob_event_cnt_max) 
+			return -ENOMEM;
 		events_gr->name_tab[events_gr->cnt] = name;
 		events_gr->cnt++;
 	}
@@ -526,21 +571,27 @@ int events_group_get_events(struct events *cmc, struct events_group *events_gr,
 	if (rt)
 		return -EAGAIN;
 	events_gr->names = kmalloc(wait_group.nbytes, GFP_KERNEL);
+	cmc->kmalloc_cnt++;
 	if (events_gr->names == NULL)
 		return -ENOMEM;
 	memset(events_gr->names, 0, wait_group.nbytes);
+	events_gr->name_tab = kmalloc(sizeof(char *)*glob_event_cnt_max, 
+				      GFP_KERNEL);
+	cmc->kmalloc_cnt++;
+	if (events_gr->name_tab == NULL)
+		return -ENOMEM;
+	memset(events_gr->name_tab, 0, sizeof(char *)*glob_event_cnt_max);
 	rt = copy_from_user(events_gr->names, wait_group.buf, wait_group.nbytes);
 	if (rt)
 		return -EAGAIN;
 	rt = events_parse_names(cmc, events_gr);
-	if (rt)
-		return -EINVAL;
-	return 0;
+	return rt;
 }
 
 int events_init_completion(struct events_group *gr)
 {
 	gr->comp = kmalloc(sizeof(struct completion), GFP_KERNEL);
+	cmc.kmalloc_cnt++;
 	if (gr->comp == NULL)
 		return -ENOMEM;
 	init_completion(gr->comp);
@@ -612,14 +663,20 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	if (rt)
 		return -EINTR;
 	rt = events_group_get_events(cmc, &events_group, user_buf);
-	if (rt)
+	if (rt) {
+		debug_message();
 		goto ret;
+	}
 	rt = events_init_completion(&events_group);
-	if (rt)
+	if (rt) {
+		debug_message();
 		goto ret;
+	}
 	rt = events_insert_group(cmc, &events_group);
-	if (rt)
+	if (rt) {
+		debug_message();
 		goto ret;
+	}
 	rt = events_group_check_not_deadlock(cmc, &events_group);
 	if (rt != 1) {
 		rt = -EDEADLK;
@@ -629,7 +686,7 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	mutex_unlock(&cmc->lock);
 	rt = wait_for_completion_interruptible(events_group.comp);
 	if (rt)
-		return -EINTR;
+		rt = -EINTR;
 	mutex_lock(&cmc->lock);
 	events_remove_group(cmc, &events_group);
 	rt = 0;
@@ -708,7 +765,8 @@ static struct events cmc = {
 		 .unlocked_ioctl = events_ioctl
 		},
 	.device = NULL,
-	.event_list = LIST_HEAD_INIT(cmc.event_list)
+	.event_list = LIST_HEAD_INIT(cmc.event_list),
+	.kmalloc_cnt = 0
 };
 
 static int __init events_init(void)
@@ -765,14 +823,23 @@ void events_remove_at_exit(struct events *cmc, struct event *event)
 	}
 	list_del(&event->element);
 	kfree(event->name);
+	cmc->kmalloc_cnt--;
 	event->name = NULL;
 	for (int i = 0; i < glob_compl_cnt_max; i++) {
 		if (event->wait[i] != NULL) {
 			kfree(event->wait[i]);
+			cmc->kmalloc_cnt--;
 			event->wait[i] = NULL;
 		}
 	}
+	kfree(event->wait);
+	cmc->kmalloc_cnt--;
+	kfree(event->proc_throws);
+	cmc->kmalloc_cnt--;
+	kfree(event->proc_waits);
+	cmc->kmalloc_cnt--;
 	kfree(event);
+	cmc->kmalloc_cnt--;
 }
 
 static void __exit events_exit(void)
@@ -787,7 +854,13 @@ static void __exit events_exit(void)
 	list_for_each_entry_safe(event, temp, &cmc.event_list, element) {
 		events_diagnose_event(event);
 		events_remove_at_exit(&cmc, event);
-	}	
+	}
+	printk("cmc.kmalloc_cnt = %d\n", cmc.kmalloc_cnt);
+	if (cmc.kmalloc_cnt) {
+		debug_message();
+		generate_oops();
+		debug_message();	
+	}
 	mutex_unlock(&cmc.lock);
 }
 

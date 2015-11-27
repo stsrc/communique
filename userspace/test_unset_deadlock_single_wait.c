@@ -73,7 +73,7 @@ void proc3()
 	sleep(10);
 	printf("6. proc3 - event_unset, should fail\n");
 	rt = event_unset(eventa);
-	event_check_error(rt, "proc3 - event_unset, positive fail\n");
+	event_check_error(rt, "proc3 - event_unset, positive fail");
 	printf("7. proc3 - event_throw\n");
 	rt = event_throw(eventb);
 	event_check_error_exit(rt, "proc3 - event_throw, FAILED - SHOULD NOT FAIL!");
