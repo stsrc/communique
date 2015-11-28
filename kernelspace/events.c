@@ -39,7 +39,7 @@ unsigned int glob_name_size = 5;
 module_param(glob_name_size, uint, S_IRUGO);
 unsigned int glob_event_cnt_max = 5;
 module_param(glob_event_cnt_max, uint, S_IRUGO);
-unsigned int glob_g_comp_cnt_max = 5;
+unsigned int glob_compl_cnt_max = 5;
 module_param(glob_compl_cnt_max, uint, S_IRUGO);
 unsigned int glob_proc = 5;
 module_param(glob_proc, uint, S_IRUGO);
@@ -88,7 +88,7 @@ void events_diagnose_event(struct event *event)
 	printk(KERN_EMERG "unsigned int g_comp: %d\n", event->g_comp);
 	printk(KERN_EMERG "struct completion **wait: %lu\n",
 	       (unsigned long)event->wait);
-	for (unsigned int i = 0; i < glob_g_comp_cnt_max; i++) {
+	for (unsigned int i = 0; i < glob_compl_cnt_max; i++) {
 		printk(KERN_EMERG "struct completion *wait[%d]: %lu\n",
 		       i, (unsigned long)event->wait[i]);
 	}
@@ -269,7 +269,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 		if (rt)
 			return -EDEADLK;
 	} else if (event->g_comp) {
-		for (unsigned int i = 1; i < glob_g_comp_cnt_max; i++) {
+		for (unsigned int i = 1; i < glob_compl_cnt_max; i++) {
 			temp = event->wait[i];
 			if (temp == NULL)
 				continue;
