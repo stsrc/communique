@@ -54,9 +54,7 @@ int event_set(char *name)
 		return rt;
 	rt = ioctl(fd, SETEVENT, name);
 	close(fd);
-	if (rt)
-		return rt;
-	return 0;
+	return rt;
 }
 
 int event_unset(char *name)
@@ -74,9 +72,7 @@ int event_unset(char *name)
 		rt = ioctl(fd, UNSETEVENT, name);
 	}
 	close(fd);
-	if (rt)
-		return 1;
-	return 0;	
+	return rt;
 }
 
 int event_throw(char *name)
@@ -90,9 +86,7 @@ int event_throw(char *name)
 		return rt;
 	rt = ioctl(fd, THROWEVENT, name);
 	close(fd);
-	if (rt)
-		return 1;
-	return 0;
+	return rt;
 }
 
 int event_wait(char *name)
@@ -106,9 +100,7 @@ int event_wait(char *name)
 		return rt;
 	rt = ioctl(fd, WAITFOREVENT, name);
 	close(fd);
-	if (rt)
-		return 1;
-	return 0;
+	return rt;
 }
 
 struct wait_group {
@@ -151,14 +143,12 @@ int event_wait_group(char **events, int events_cnt)
 	rt = ioctl(fd, WAITINGROUP, &wait_group);
 	free(wait_group.events);
 	close(fd);
-	if (rt)
-		return 1;
-	return 0;
+	return rt;
 }
 
 int event_check_error_exit(int rt, char *string)
 {
-	if(rt) {
+	if(rt < 0) {
 		perror(string);
 		exit(rt);
 	}
@@ -167,7 +157,7 @@ int event_check_error_exit(int rt, char *string)
 
 int event_check_error(int rt, char *string)
 {
-	if(rt)
+	if(rt < 0)
 		perror(string);
 	return 0;
 }
