@@ -128,12 +128,12 @@ int events_open(struct inode *inode, struct file *file)
 char *events_get_name(const char __user *buf)
 {
 	int rt;
-	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
+	char *name = kmalloc(sizeof(char) * (glob_name_size + 1), GFP_KERNEL);
 	cmc.kmalloc_cnt++;
 	if (unlikely(name == NULL))
 		return NULL;
-	memset(name, 0, sizeof(char)*glob_name_size);
-	rt = copy_from_user(name, buf, glob_name_size - 1);
+	memset(name, 0, sizeof(char)*(glob_name_size + 1));
+	rt = copy_from_user(name, buf, glob_name_size);
 	if (unlikely(rt)) {
 		kfree(name);
 		cmc.kmalloc_cnt--;
@@ -158,10 +158,10 @@ ssize_t events_add_task(struct task_struct **arr, ssize_t size,
 	ssize_t i;
 	i = events_search_task(arr, size, task);
 	if (i != -1)
-		return -1;
+		return -EINVAL;
 	i = events_search_task(arr, size, 0);
 	if (i == -1)
-		return -1;
+		return -ENOMEM;
 	arr[i] = task;
 	return 0;
 }
@@ -254,7 +254,7 @@ int events_unset_check_if_all_waits(struct events *cmc,
 			continue;
 		else if (proc_throws[i] == current)
 			continue;
-		temp = events_check_if_proc_waits(cmc, proc_throws[i]);//TODO
+		temp = events_check_if_proc_waits(cmc, proc_throws[i]);
 		if (temp == NULL)
 			return 0;
 	}
@@ -444,22 +444,15 @@ int events_set(struct events *cmc, const char __user *buf)
 	}
 	event = events_search(cmc, name);
 	if (event != NULL) {
-		events_diagnose_event(event);
 		events_clean_event(event);
-		events_diagnose_event(event);
 		rt = events_add_task(event->proc_throws, glob_proc, current);
-		if (rt == -2)		//TODO
-			rt = -ENOMEM;
-		else if (rt == -1)
-			rt = -EINVAL;
-		debug_message();
 		mutex_unlock(&cmc->lock);
 		kfree(name);
 		cmc->kmalloc_cnt--;
 		return rt;
 	}
 	cmc->event_cnt++;
-	if (cmc->event_cnt >= glob_event_cnt_max)
+	if (cmc->event_cnt > glob_event_cnt_max)
 		goto no_mem;
 	event = events_init_event(name);
 	if (event == NULL)
@@ -535,8 +528,9 @@ int events_wait(struct events *cmc, const char __user *buf)
 	event->s_comp++;
 	rt = events_add_task(event->proc_waits, glob_proc, current);
 	if (rt) {
+		event->s_comp--;
 		mutex_unlock(&cmc->lock);
-		return -EINVAL;
+		return -ENOMEM;
 	}
 	rt = events_check_not_deadlock(cmc, current, event);
 	if (!rt) {
@@ -609,7 +603,7 @@ int events_parse_names(struct events *cmc, struct events_group *events_gr)
 		event = events_search(cmc, name);
 		if (event == NULL)
 			return -EINVAL;
-		if (events_gr->cnt >= glob_event_cnt_max) 
+		if (events_gr->cnt + 1 > glob_event_cnt_max) 
 			return -ENOMEM;
 		events_gr->name_tab[events_gr->cnt] = name;
 		events_gr->cnt++;

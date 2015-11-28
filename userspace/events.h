@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <libudev.h>
 
 int event_set(char *name);
 int event_wait(char *name);

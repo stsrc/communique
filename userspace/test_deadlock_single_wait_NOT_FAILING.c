@@ -94,7 +94,7 @@ int main(void)
 	printf("proc1 - event_throw\n");
 	rt = event_throw(events[0]);
 	event_check_error_exit(rt, "proc1 - event_throw, FAILED - SHOULD NOT FAIL!");
-	sleep(5);
+	//sleep(5);
 	printf("proc1 - event_unset\n");
 	rt = event_unset(events[0]);
 	event_check_error_exit(rt, "proc1 - event_unset, FAILED - SHOULD NOT FAIL!");	
