@@ -21,7 +21,8 @@ void proc2()
 		while(cnt < 4) {
 			printf("proc2: event_wait\n");
 			rt = event_wait_group(events, 4);
-			printf("proc2: event caught\n");
+			if (rt > 0)
+				printf("proc2: event %s caught\n", events[rt-1]);
 			event_check_error_exit(rt, "proc2: event_wait FAILS!");
 			cnt++;
 		}
