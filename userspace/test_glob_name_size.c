@@ -20,7 +20,7 @@ int main(void)
 	char *event = "wwwwwwwwwwwwwwwwwww\0";
 	printf("proc1: event_set. Should fail.\n");
 	rt = event_set(event);
-	event_check_error_exit(rt, "proc1: event_set. Positive fail\n");
+	event_check_error_exit(rt, "proc1: event_set. Positive fail");
 	printf("proc1: event_set have not failed!\n");
 	printf("proc1: event_unset.\n");
 	event_unset(event);

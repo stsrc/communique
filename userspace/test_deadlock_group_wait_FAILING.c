@@ -14,7 +14,7 @@ void proc1(char **events)
 {
 	int rt;
 	sleep(2); //assurance of proc2 being in waiting state
-	printf("proc1: event_wait_group\n");
+	printf("proc1: event_wait_group.\n");
 	rt = event_wait_group(events, 4);
 	event_check_error_exit(rt, "proc1: event_wait FAILED - SHOULD FAIL!");
 	printf("proc1: event_unset a\n");

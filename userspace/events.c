@@ -11,48 +11,35 @@ static inline int event_open()
 	return open("/dev/events", O_RDWR);
 }
 
-
 int event_get_name_len()
 {
-	struct udev *udev;
-	struct udev_device *device;
-	const char *value;
-	int rt;
-	struct udev_list_entry *list_entry;
-	udev = udev_new();
-	device = udev_device_new_from_subsystem_sysname(udev, "events", "events");
-	if (device == NULL) {
-		printf("device NULL\n");
-		return -EBUSY;
+	int fd;
+	char value[16];
+	int rt;	
+	memset(value, 0, sizeof(value));
+	fd = open("/sys/module/events/parameters/glob_name_size\0", O_RDONLY);
+	if (fd < 0) {
+		return fd;
 	}
-	list_entry = udev_device_get_properties_list_entry(device);
-	if (list_entry == NULL) {
-		printf("list_entry null\n");
-		return -EBUSY;
-	}
-	while(list_entry != NULL) {
-		printf("name = %s\n", udev_list_entry_get_name(list_entry));
-		list_entry = udev_list_entry_get_next(list_entry);
-	}
-	value = udev_device_get_sysattr_value(device, "parameters/glob_name_size");
-	if (value == NULL) {
-		printf("value NULL\n");
-		return -EBUSY;
+	rt = read(fd, value, sizeof(value));
+	if (rt < 0) {
+		errno = EAGAIN;
+		return -EAGAIN;
 	}
 	rt = (int)strtol(value, NULL, 10); 	
-	udev_device_unref(device);
-	udev_unref(udev);
+	close(fd);
 	return rt;
 }
-
 
 int event_check_name(char *name) 
 {
 	int max_len = event_get_name_len();
 	if (max_len < 0)
-		return -EBUSY;
-	else if (max_len < strlen(name))
+		return max_len;
+	else if (max_len < strlen(name)) {
+		errno = EINVAL;
 		return -EINVAL;
+	}
 	return 0;
 }
 
@@ -62,9 +49,9 @@ int event_set(char *name)
 	fd = event_open();
 	if (fd < 0)
 		return fd;
-//	rt = event_check_name(name);
-//	if (rt)
-//		return rt;
+	rt = event_check_name(name);
+	if (rt)
+		return rt;
 	rt = ioctl(fd, SETEVENT, name);
 	close(fd);
 	if (rt)
@@ -78,9 +65,9 @@ int event_unset(char *name)
 	fd = event_open();
 	if (fd < 0)
 		return fd;
-//	rt = event_check_name(name);
-//	if (rt)
-//		return rt;
+	rt = event_check_name(name);
+	if (rt)
+		return rt;
 	rt = ioctl(fd, UNSETEVENT, name);
 	while (rt && (errno == EAGAIN)) {
 		sleep(1);
@@ -98,9 +85,9 @@ int event_throw(char *name)
 	fd = event_open();
 	if (fd < 0)
 		return 1;
-//	rt = event_check_name(name);
-//	if (rt)
-//		return rt;
+	rt = event_check_name(name);
+	if (rt)
+		return rt;
 	rt = ioctl(fd, THROWEVENT, name);
 	close(fd);
 	if (rt)
@@ -114,9 +101,9 @@ int event_wait(char *name)
 	fd = event_open();
 	if (fd < 0)
 		return 1;
-//	rt = event_check_name(name);
-//	if (rt)
-//		return rt;
+	rt = event_check_name(name);
+	if (rt)
+		return rt;
 	rt = ioctl(fd, WAITFOREVENT, name);
 	close(fd);
 	if (rt)
@@ -133,18 +120,20 @@ int event_wait_group(char **events, int events_cnt)
 {
 	struct wait_group wait_group;
 	int rt = 0, fd = 0, cnt = 0;
-//	int max_length = 0;
+	int max_length = 0;
 	int length = 0;
 	fd = event_open();
 	if (fd < 0)
 		return fd;
-//	max_length = event_get_name_len();
-//	if (max_length < 0)
-//		return max_length;
+	max_length = event_get_name_len();
+	if (max_length < 0)
+		return max_length;
 	for (int i = 0; i < events_cnt; i++) {
 		length = strlen(events[i]);
-//		if (length > max_length)
-//			return -EINVAL;
+		if (length > max_length) {
+			errno = EINVAL;
+			return -EINVAL;
+		}
 		cnt += length + 1;
 	}
 	wait_group.nbytes = cnt;
