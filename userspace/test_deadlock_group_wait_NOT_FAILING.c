@@ -16,6 +16,8 @@ void proc1(char **events)
 	sleep(1); //assurance of waiting proc2
 	printf("proc1: event_wait_group.\n");
 	rt = event_wait_group(events, 4);
+	if (rt > 0)
+		printf("proc1: event %s caught.\n", events[rt - 1]);
 	event_check_error_exit(rt, "proc2: event_wait FAILED - SHOULD NOT FAIL!");
 	printf("proc1: event_unset.\n");
 	rt = event_unset(events[0]);
@@ -44,6 +46,8 @@ void proc2(char **events)
 	event_check_error_exit(rt, "proc2: event_set");	
 	printf("proc2: event_wait_group.\n");
 	rt = event_wait_group(events_2, 3);
+	if (rt > 0)
+		printf("proc2: event %s caught.\n", events_2[rt - 1]);
 	event_check_error_exit(rt, "proc2: event_wait_group. SHOULD NOT FAIL");
 	printf("proc2: event_unset.\n");
 	rt = event_unset(events[0]);
@@ -70,11 +74,11 @@ void proc3(char **events)
 	rt = event_set(events[3]);
 	event_check_error_exit(rt, "proc3: event_set");	
 	sleep(5); //assurance of waiting proc1
-	printf("proc3: event_throw.\n");
+	printf("proc3: event_throw: %s\n", events[2]);
 	rt = event_throw(events[2]);
 	event_check_error_exit(rt, "proc3: event_throw");
 	sleep(1); 
-	printf("proc3: event_throw.\n");
+	printf("proc3: event_throw: %s\n", events[0]);
 	rt = event_throw(events[0]);
 	event_check_error_exit(rt, "proc3: event_throw");
 	printf("proc3: event_unset\n");

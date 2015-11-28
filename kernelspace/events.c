@@ -47,6 +47,7 @@ module_param(glob_proc, uint, S_IRUGO);
 struct event {
 	char *name;
 	struct completion **wait;
+	char **completed_by;
 	unsigned int s_comp;
 	unsigned int g_comp;
 	struct list_head element;
@@ -214,7 +215,7 @@ ssize_t events_remove_compl(struct completion **arr, ssize_t size,
 	if (i == -1)
 		return -1;
 	arr[i] = NULL;
-	return 0;
+	return i;
 }
 
 struct event *events_search(struct events *cmc, const char *name)
@@ -311,6 +312,9 @@ void events_delete_event(struct events *cmc, struct event *event)
 	kfree(event->wait);
 	cmc->kmalloc_cnt--;
 	event->wait = NULL;
+	kfree(event->completed_by);
+	cmc->kmalloc_cnt--;
+	event->completed_by = NULL;
 	kfree(event->proc_throws);
 	cmc->kmalloc_cnt--;
 	event->proc_throws = NULL;
@@ -383,11 +387,19 @@ static inline struct event* events_init_event(char *name)
 	cmc.kmalloc_cnt++;
 	if (unlikely(event->wait[0] == NULL))
 		goto err;
+	event->completed_by = kmalloc(sizeof(char *)*glob_compl_cnt_max, 
+				      GFP_KERNEL);
+	cmc.kmalloc_cnt++;
+	if (unlikely(event->completed_by == NULL))
+		goto err;
+	memset(event->completed_by, 0, sizeof(char *)*glob_compl_cnt_max);
 	events_add_task(event->proc_throws, glob_proc, current);
 	init_completion(event->wait[0]);
 	INIT_LIST_HEAD(&event->element);
 	return event;
 err:
+	kfree(event->wait[0]);
+	cmc.kmalloc_cnt--;
 	kfree(event->wait);
 	cmc.kmalloc_cnt--;
 	kfree(event->proc_throws);
@@ -548,7 +560,7 @@ int events_wait(struct events *cmc, const char __user *buf)
 	event->s_comp--;
 	events_remove_task(event->proc_waits, glob_proc, current);
 	mutex_unlock(&cmc->lock);
-	return 0;
+	return rt;
 }
 
 struct wait_group {
@@ -647,7 +659,7 @@ int events_init_completion(struct events_group *gr)
 int events_remove_group(struct events *cmc, struct events_group *gr)
 {
 	struct event *event;
-	int rt;
+	int rt, completed_by = 0;
 	for (unsigned int i = 0; i < gr->cnt; i++) {
 		event = events_search(cmc, gr->name_tab[i]);
 		if (event == NULL)
@@ -660,13 +672,19 @@ int events_remove_group(struct events *cmc, struct events_group *gr)
 				    gr->comp);
 		if (rt == -1)
 			continue;
+		if (event->completed_by[rt] != NULL) {
+			rt = strcmp(event->name, event->completed_by[rt]);
+			if (!rt)
+				completed_by = i + 1;
+			event->completed_by[rt] = NULL;
+		}
 		if (!event->g_comp) {
 			debug_message();
 			generate_oops();
 		}
 		event->g_comp--;
 	}
-	return 0;
+	return completed_by;
 }
 
 int events_insert_group(struct events *cmc, struct events_group *gr)
@@ -738,8 +756,7 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	if (rt)
 		rt = -EINTR;
 	mutex_lock(&cmc->lock);
-	events_remove_group(cmc, &events_group);
-	rt = 0;
+	rt = events_remove_group(cmc, &events_group);
 ret:
 	events_del_group_struct(&events_group);
 	mutex_unlock(&cmc->lock);
@@ -772,8 +789,12 @@ int events_throw(struct events *cmc, const char __user *buf)
 		complete_all(event->wait[0]);
 	if (event->g_comp) {
 		for(unsigned int i = 1; i < glob_compl_cnt_max; i++) {
-			if (event->wait[i] != NULL) 
+			if (event->wait[i] != NULL) {
+				if (event->wait[i]->done)
+					continue;
 				complete_all(event->wait[i]);
+				event->completed_by[i] = event->name;
+			}
 		}
 	}
 	mutex_unlock(&cmc->lock);
@@ -880,6 +901,8 @@ void events_remove_at_exit(struct events *cmc, struct event *event)
 			event->wait[i] = NULL;
 		}
 	}
+	kfree(event->completed_by);
+	cmc->kmalloc_cnt--;
 	kfree(event->wait);
 	cmc->kmalloc_cnt--;
 	kfree(event->proc_throws);
