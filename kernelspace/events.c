@@ -39,14 +39,10 @@ unsigned int glob_name_size = 5;
 module_param(glob_name_size, uint, S_IRUGO);
 unsigned int glob_event_cnt_max = 5;
 module_param(glob_event_cnt_max, uint, S_IRUGO);
-unsigned int glob_compl_cnt_max = 5;
+unsigned int glob_g_comp_cnt_max = 5;
 module_param(glob_compl_cnt_max, uint, S_IRUGO);
 unsigned int glob_proc = 5;
 module_param(glob_proc, uint, S_IRUGO);
-
-/* TODO:
- * handling interrupt conditions
- */
 
 struct event {
 	char *name;
@@ -54,8 +50,8 @@ struct event {
 	unsigned int s_comp;
 	unsigned int g_comp;
 	struct list_head element;
-	pid_t *proc_throws;
-	pid_t *proc_waits;
+	struct task_struct **proc_throws;
+	struct task_struct **proc_waits;
 };
 
 struct events {
@@ -73,7 +69,8 @@ struct events {
 };
 
 static struct events cmc;
-struct event *events_check_if_proc_waits(struct events *cmc, pid_t pid);
+struct event *events_check_if_proc_waits(struct events *cmc, 
+					 struct task_struct *task);
 
 static inline void generate_oops(void)
 {
@@ -89,16 +86,22 @@ void events_diagnose_event(struct event *event)
 	printk(KERN_EMERG "name: %s\n", event->name);
 	printk(KERN_EMERG "unsigned int s_comp: %u\n", event->s_comp);
 	printk(KERN_EMERG "unsigned int g_comp: %d\n", event->g_comp);
-	for (unsigned int i = 0; i < glob_compl_cnt_max; i++) {
+	printk(KERN_EMERG "struct completion **wait: %lu\n",
+	       (unsigned long)event->wait);
+	for (unsigned int i = 0; i < glob_g_comp_cnt_max; i++) {
 		printk(KERN_EMERG "struct completion *wait[%d]: %lu\n",
 		       i, (unsigned long)event->wait[i]);
 	}
+	printk(KERN_EMERG "struct task_struct **proc_throws: %lu\n",
+	       (unsigned long)event->proc_throws);
 	for(unsigned int i = 0; i < glob_proc; i++) {
-		printk(KERN_EMERG "pid_t proc_throws[%d]: %lu\n",
+		printk(KERN_EMERG "struct task_struct *proc_throws[%d]: %lu\n",
 		       i, (unsigned long)event->proc_throws[i]);
 	}
+	printk(KERN_EMERG "struct task_struct **proc_waits: %lu\n",
+	       (unsigned long)event->proc_waits);
 	for(unsigned int i = 0; i < glob_proc; i++) {
-		printk(KERN_EMERG "pid_t proc_waits[%d]: %lu\n",
+		printk(KERN_EMERG "struct task_struct *proc_waits[%d]: %lu\n",
 		       i, (unsigned long)event->proc_waits[i]);
 	}
 }
@@ -117,16 +120,15 @@ int events_open(struct inode *inode, struct file *file)
  * WARNING - function dynamically allocates memory!
  * Remember to call free when obtained name string will not be used anymore!
  */
-
 char *events_get_name(const char __user *buf)
 {
 	int rt;
-	char *name = kmalloc(sizeof(char) * glob_name_size, GFP_KERNEL);
+	char *name = kmalloc(sizeof(char) * (glob_name_size + 1), GFP_KERNEL);
 	cmc.kmalloc_cnt++;
 	if (unlikely(name == NULL))
 		return NULL;
-	memset(name, 0, sizeof(char)*glob_name_size);
-	rt = copy_from_user(name, buf, glob_name_size - 1);
+	memset(name, 0, sizeof(char)*(glob_name_size + 1));
+	rt = copy_from_user(name, buf, glob_name_size);
 	if (unlikely(rt)) {
 		kfree(name);
 		cmc.kmalloc_cnt--;
@@ -135,43 +137,46 @@ char *events_get_name(const char __user *buf)
 	return name;	
 }
 
-ssize_t events_search_pid(pid_t *arr, ssize_t size, pid_t pid)
+ssize_t events_search_task(struct task_struct **arr, ssize_t size, 
+			  struct task_struct *task)
 {
 	for (ssize_t i = 0; i < size; i++) {
-		if (pid == arr[i])
+		if (task == arr[i])
 			return i;
 	}
 	return -1;
 }
 
-ssize_t events_add_pid(pid_t *arr, ssize_t size, pid_t pid)
+ssize_t events_add_task(struct task_struct **arr, ssize_t size, 
+		        struct task_struct *task)
 {
 	ssize_t i;
-	i = events_search_pid(arr, size, pid);
+	i = events_search_task(arr, size, task);
 	if (i != -1)
-		return -1;
-	i = events_search_pid(arr, size, 0);
+		return -EINVAL;
+	i = events_search_task(arr, size, 0);
 	if (i == -1)
-		return -1;
-	arr[i] = pid;
+		return -ENOMEM;
+	arr[i] = task;
 	return 0;
 }
 
-ssize_t events_remove_pid(pid_t *arr, ssize_t size, pid_t pid)
+ssize_t events_remove_task(struct task_struct **arr, ssize_t size, 
+			   struct task_struct *task)
 {
 	ssize_t i;
-	i = events_search_pid(arr, size, pid);
+	i = events_search_task(arr, size, task);
 	if (i == -1)
 		return -1;
-	arr[i] = 0;
+	arr[i] = NULL;
 	return 0;
 }
 
-unsigned int events_non_zero_pid(pid_t *arr, ssize_t size)
+unsigned int events_non_zero_task(struct task_struct **arr, ssize_t size)
 {
 	unsigned int cnt = 0;
 	for (ssize_t i = 0; i < size; i++) {
-		if (arr[i] != 0)
+		if (arr[i] != NULL)
 			cnt++;
 	}
 	return cnt;
@@ -235,13 +240,14 @@ struct event *events_get_event(struct events *cmc, const char __user *buf)
 	return event;
 }
 
-int events_unset_check_if_all_waits(struct events *cmc, pid_t *proc_throws)
+int events_unset_check_if_all_waits(struct events *cmc, 
+				    struct task_struct **proc_throws)
 {
 	struct event *temp;
 	for (unsigned int i = 0; i < glob_proc; i++) {
-		if (proc_throws[i] == 0)
+		if (proc_throws[i] == NULL)
 			continue;
-		else if (proc_throws[i] == current->pid)
+		else if (proc_throws[i] == current)
 			continue;
 		temp = events_check_if_proc_waits(cmc, proc_throws[i]);
 		if (temp == NULL)
@@ -263,7 +269,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 		if (rt)
 			return -EDEADLK;
 	} else if (event->g_comp) {
-		for (unsigned int i = 1; i < glob_compl_cnt_max; i++) {
+		for (unsigned int i = 1; i < glob_g_comp_cnt_max; i++) {
 			temp = event->wait[i];
 			if (temp == NULL)
 				continue;
@@ -281,7 +287,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 static inline int events_unset_check(struct events *cmc, struct event *event)
 {
 	int rt;
-	rt = events_search_pid(event->proc_throws, glob_proc, current->pid);
+	rt = events_search_task(event->proc_throws, glob_proc, current);
 	if (rt == -1)
 		return -EACCES;
 	rt = events_unset_check_deadlock(cmc, event);
@@ -330,8 +336,8 @@ int events_unset(struct events *cmc, const char __user *buf)
 	rt = events_unset_check(cmc, event);
 	if (rt < 0)
 		goto ret;
-	events_remove_pid(event->proc_throws, glob_proc, current->pid);
-	rt = events_non_zero_pid(event->proc_throws, glob_proc);
+	events_remove_task(event->proc_throws, glob_proc, current);
+	rt = events_non_zero_task(event->proc_throws, glob_proc);
 	if (rt > 0) {
 		rt = 0;
 		goto ret;
@@ -361,21 +367,23 @@ static inline struct event* events_init_event(char *name)
 	if (unlikely(event->wait == NULL))
 		goto err;
 	memset(event->wait, 0, sizeof(struct completion *)*glob_compl_cnt_max);
-	event->proc_throws = kmalloc(sizeof(pid_t)*glob_proc, GFP_KERNEL);
+	event->proc_throws = kmalloc(sizeof(struct task_struct *)*glob_proc,
+				     GFP_KERNEL);
 	cmc.kmalloc_cnt++;
 	if (unlikely(event->proc_throws == NULL))
 		goto err;
-	memset(event->proc_throws, 0, sizeof(pid_t)*glob_proc);
-	event->proc_waits = kmalloc(sizeof(pid_t)*glob_proc, GFP_KERNEL);
+	memset(event->proc_throws, 0, sizeof(struct task_struct *)*glob_proc);
+	event->proc_waits = kmalloc(sizeof(struct task_struct *)*glob_proc,
+				    GFP_KERNEL);
 	cmc.kmalloc_cnt++;
 	if (unlikely(event->proc_waits == NULL))
 		goto err;
-	memset(event->proc_waits, 0, sizeof(pid_t)*glob_proc);
+	memset(event->proc_waits, 0, sizeof(struct task_struct *)*glob_proc);
 	event->wait[0] = kmalloc(sizeof(struct completion), GFP_KERNEL);
 	cmc.kmalloc_cnt++;
 	if (unlikely(event->wait[0] == NULL))
 		goto err;
-	events_add_pid(event->proc_throws, glob_proc, current->pid);
+	events_add_task(event->proc_throws, glob_proc, current);
 	init_completion(event->wait[0]);
 	INIT_LIST_HEAD(&event->element);
 	return event;
@@ -389,6 +397,32 @@ err:
 	kfree(event);
 	cmc.kmalloc_cnt--;
 	return NULL;
+}
+
+int events_remove_abandonment(struct event *event)
+{
+	int rt;
+	struct task_struct *task;
+	for (unsigned int i = 0; i < glob_proc; i++) {
+		task = event->proc_throws[i];
+		if (task == NULL)
+			continue;
+		rt = pid_alive(task);
+		if (!rt)
+			events_remove_task(event->proc_throws, glob_proc, task);
+	}
+	rt = events_non_zero_task(event->proc_throws, glob_proc);
+	if (rt == 0)
+		return -1;
+	else
+		return 0;
+}
+
+void events_clean_event(struct event *event)
+{
+	int rt = events_remove_abandonment(event);
+	if (rt < 0)
+		reinit_completion(event->wait[0]);
 }
 
 int events_set(struct events *cmc, const char __user *buf)
@@ -405,16 +439,17 @@ int events_set(struct events *cmc, const char __user *buf)
 	}
 	event = events_search(cmc, name);
 	if (event != NULL) {
-		rt = events_add_pid(event->proc_throws, glob_proc, current->pid);
-		if (rt)
-			rt = -EINVAL;
+		events_clean_event(event);
+		rt = events_add_task(event->proc_throws, glob_proc, current);
+		if (rt == -EINVAL)
+			rt = 0;
 		mutex_unlock(&cmc->lock);
 		kfree(name);
 		cmc->kmalloc_cnt--;
 		return rt;
 	}
 	cmc->event_cnt++;
-	if (cmc->event_cnt >= glob_event_cnt_max)
+	if (cmc->event_cnt > glob_event_cnt_max)
 		goto no_mem;
 	event = events_init_event(name);
 	if (event == NULL)
@@ -434,37 +469,39 @@ no_mem:
 	return -ENOMEM;
 }
 
-struct event *events_check_if_proc_waits(struct events *cmc, pid_t pid)
+struct event *events_check_if_proc_waits(struct events *cmc, 
+					 struct task_struct *task)
 {
 	struct event *event = NULL;
 	list_for_each_entry(event, &cmc->event_list, element) {
-		if (events_search_pid(event->proc_waits, glob_proc, pid) != -1) {
+		if (events_search_task(event->proc_waits, glob_proc, task)
+		    != -1) {
 			return event;
 		}
 	}
 	return NULL;	
 }
 
-int events_check_not_deadlock(struct events *cmc, pid_t current_pid, 
-			      struct event *event)
+int events_check_not_deadlock(struct events *cmc, struct task_struct 
+			      *current_task, struct event *event)
 {	
 	struct event *temp;
 	int rt;
-	pid_t pid_throwing;
+	struct task_struct *task_throwing;
 	for (unsigned int i = 0; i < glob_proc; i++) {
-		pid_throwing = event->proc_throws[i];
-		if (pid_throwing == 0)
+		task_throwing = event->proc_throws[i];
+		if (task_throwing == NULL)
 			continue;
-		if (pid_throwing == current_pid)
+		if (task_throwing == current_task)
 			continue;
-		rt = events_search_pid(event->proc_waits, glob_proc, 
-				       pid_throwing);
+		rt = events_search_task(event->proc_waits, glob_proc, 
+				       task_throwing);
 		if (rt != -1) 
 			continue;
-		temp = events_check_if_proc_waits(cmc, pid_throwing);
+		temp = events_check_if_proc_waits(cmc, task_throwing);
 		if (temp == NULL)
 			return 1;
-		rt = events_check_not_deadlock(cmc, current_pid, temp);
+		rt = events_check_not_deadlock(cmc, current_task, temp);
 		if (rt)
 			return rt;
 	}
@@ -486,33 +523,32 @@ int events_wait(struct events *cmc, const char __user *buf)
 	if (!event->s_comp)
 		init_completion((struct completion *)event->wait[0]);
 	event->s_comp++;
-	rt = events_add_pid(event->proc_waits, glob_proc, current->pid);
+	rt = events_add_task(event->proc_waits, glob_proc, current);
 	if (rt) {
+		event->s_comp--;
 		mutex_unlock(&cmc->lock);
-		return -EINVAL;
+		return -ENOMEM;
 	}
-	rt = events_check_not_deadlock(cmc, current->pid, event);
+	rt = events_check_not_deadlock(cmc, current, event);
 	if (!rt) {
+		event->s_comp--;
+		events_remove_task(event->proc_waits, glob_proc, current);
 		mutex_unlock(&cmc->lock);
 		return -EDEADLK;
 	}
 	mutex_unlock(&cmc->lock);
-	printk(KERN_EMERG "&event->wait[0] = %lu\n", (unsigned long)&event->wait[0]);
 	rt = wait_for_completion_interruptible(event->wait[0]);
 	if (rt)
-		return -EINTR;
-	rt = mutex_lock_interruptible(&cmc->lock);
-	if (rt)
-		return -EINTR;
+		rt = -EINTR;
+	mutex_lock(&cmc->lock);
 	if (!event->s_comp) {
 		debug_message();
 		generate_oops();
 	}
 	event->s_comp--;
-	events_remove_pid(event->proc_waits, glob_proc, current->pid);
-	if (!rt)
-		mutex_unlock(&cmc->lock);
-	return rt;
+	events_remove_task(event->proc_waits, glob_proc, current);
+	mutex_unlock(&cmc->lock);
+	return 0;
 }
 
 struct wait_group {
@@ -549,7 +585,7 @@ int events_group_check_not_deadlock(struct events *cmc,
 		event = events_search(cmc, gr->name_tab[i]);
 		if (event == NULL)
 			return -EINVAL;
-		rt = events_check_not_deadlock(cmc, current->pid, event);
+		rt = events_check_not_deadlock(cmc, current, event);
 		if (rt)
 			return rt;
 	}
@@ -564,7 +600,7 @@ int events_parse_names(struct events *cmc, struct events_group *events_gr)
 		event = events_search(cmc, name);
 		if (event == NULL)
 			return -EINVAL;
-		if (events_gr->cnt >= glob_event_cnt_max) 
+		if (events_gr->cnt + 1 > glob_event_cnt_max) 
 			return -ENOMEM;
 		events_gr->name_tab[events_gr->cnt] = name;
 		events_gr->cnt++;
@@ -616,8 +652,8 @@ int events_remove_group(struct events *cmc, struct events_group *gr)
 		event = events_search(cmc, gr->name_tab[i]);
 		if (event == NULL)
 			continue;
-		rt = events_remove_pid(event->proc_waits, glob_proc, 
-				       current->pid);
+		rt = events_remove_task(event->proc_waits, glob_proc, 
+				       current);
 		if (rt == -1)
 			continue;
 		rt = events_remove_compl(event->wait, glob_compl_cnt_max,
@@ -643,7 +679,7 @@ int events_insert_group(struct events *cmc, struct events_group *gr)
 			events_remove_group(cmc, gr);
 			return -EINVAL;
 		}
-		rt = events_add_pid(event->proc_waits, glob_proc, current->pid);	
+		rt = events_add_task(event->proc_waits, glob_proc, current);	
 		if (rt) {
 			events_remove_group(cmc, gr);
 			return -EINVAL;
@@ -700,10 +736,8 @@ int events_group_wait(struct events *cmc, const char __user *user_buf)
 	mutex_unlock(&cmc->lock);
 	rt = wait_for_completion_interruptible(events_group.comp);
 	if (rt)
-		return -EINTR;
-	rt = mutex_lock_interruptible(&cmc->lock);
-	if (rt)
-		return -EINTR;
+		rt = -EINTR;
+	mutex_lock(&cmc->lock);
 	events_remove_group(cmc, &events_group);
 	rt = 0;
 ret:
@@ -725,7 +759,7 @@ int events_throw(struct events *cmc, const char __user *buf)
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
-	rt = events_search_pid(event->proc_throws, glob_proc, current->pid);
+	rt = events_search_task(event->proc_throws, glob_proc, current);
 	if (rt == -1) {
 		mutex_unlock(&cmc->lock);
 		return -EPERM;
@@ -734,7 +768,6 @@ int events_throw(struct events *cmc, const char __user *buf)
 		mutex_unlock(&cmc->lock);
 		return 0;
 	}
-	printk(KERN_EMERG "&event->wait[0] = %lu\n", (unsigned long)&event->wait[0]);
 	if (event->s_comp)
 		complete_all(event->wait[0]);
 	if (event->g_comp) {
@@ -833,10 +866,8 @@ err:
 
 void events_remove_at_exit(struct events *cmc, struct event *event)
 {
-	if (!cmc->event_cnt) {
-		generate_oops();
+	if (!cmc->event_cnt) 
 		debug_message();
-	}
 	cmc->event_cnt--;
 	list_del(&event->element);
 	kfree(event->name);
@@ -873,7 +904,8 @@ static void __exit events_exit(void)
 		events_remove_at_exit(&cmc, event);
 	}
 	if (cmc.kmalloc_cnt) {//MEMORY LEAK!!!
-		printk(KERN_EMERG "cmc.kmalloc_cnt = %d\n", cmc.kmalloc_cnt);
+		printk(KERN_EMERG "WARNING! MEMORY LEAK! "
+		       "cmc.kmalloc_cnt = %d\n", cmc.kmalloc_cnt);
 		debug_message();	
 	}
 	mutex_unlock(&cmc.lock);

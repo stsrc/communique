@@ -11,16 +11,51 @@ static inline int event_open()
 	return open("/dev/events", O_RDWR);
 }
 
+int event_get_name_len()
+{
+	int fd;
+	char value[16];
+	int rt;	
+	memset(value, 0, sizeof(value));
+	fd = open("/sys/module/events/parameters/glob_name_size\0", O_RDONLY);
+	if (fd < 0) {
+		return fd;
+	}
+	rt = read(fd, value, sizeof(value));
+	if (rt < 0) {
+		errno = EAGAIN;
+		return -EAGAIN;
+	}
+	rt = (int)strtol(value, NULL, 10); 	
+	close(fd);
+	return rt;
+}
+
+int event_check_name(char *name) 
+{
+	int max_len = event_get_name_len();
+	if (max_len < 0)
+		return max_len;
+	else if (max_len < strlen(name)) {
+		errno = EINVAL;
+		return -EINVAL;
+	}
+	return 0;
+}
+
 int event_set(char *name)
 {
 	int rt, fd;
 	fd = event_open();
 	if (fd < 0)
-		return 1;
+		return fd;
+	rt = event_check_name(name);
+	if (rt)
+		return rt;
 	rt = ioctl(fd, SETEVENT, name);
 	close(fd);
 	if (rt)
-		return 1;
+		return rt;
 	return 0;
 }
 
@@ -29,7 +64,10 @@ int event_unset(char *name)
 	int rt, fd;
 	fd = event_open();
 	if (fd < 0)
-		return 1;
+		return fd;
+	rt = event_check_name(name);
+	if (rt)
+		return rt;
 	rt = ioctl(fd, UNSETEVENT, name);
 	while (rt && (errno == EAGAIN)) {
 		sleep(1);
@@ -47,6 +85,9 @@ int event_throw(char *name)
 	fd = event_open();
 	if (fd < 0)
 		return 1;
+	rt = event_check_name(name);
+	if (rt)
+		return rt;
 	rt = ioctl(fd, THROWEVENT, name);
 	close(fd);
 	if (rt)
@@ -60,6 +101,9 @@ int event_wait(char *name)
 	fd = event_open();
 	if (fd < 0)
 		return 1;
+	rt = event_check_name(name);
+	if (rt)
+		return rt;
 	rt = ioctl(fd, WAITFOREVENT, name);
 	close(fd);
 	if (rt)
@@ -75,18 +119,28 @@ struct wait_group {
 int event_wait_group(char **events, int events_cnt)
 {
 	struct wait_group wait_group;
-
-	int rt, fd, cnt = 0;
+	int rt = 0, fd = 0, cnt = 0;
+	int max_length = 0;
+	int length = 0;
 	fd = event_open();
 	if (fd < 0)
-		return 1;
-	for (int i = 0; i < events_cnt; i++)
-		cnt += strlen(events[i]) + 1;
+		return fd;
+	max_length = event_get_name_len();
+	if (max_length < 0)
+		return max_length;
+	for (int i = 0; i < events_cnt; i++) {
+		length = strlen(events[i]);
+		if (length > max_length) {
+			errno = EINVAL;
+			return -EINVAL;
+		}
+		cnt += length + 1;
+	}
 	wait_group.nbytes = cnt;
 	wait_group.events = malloc(cnt);
 	if (wait_group.events == NULL) {
 		close(fd);
-		return 1;
+		return -ENOMEM;
 	}
 	memset(wait_group.events, 0, cnt);
 	for (int i = 0; i < events_cnt; i++) {
