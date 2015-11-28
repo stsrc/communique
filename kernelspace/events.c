@@ -44,10 +44,6 @@ module_param(glob_compl_cnt_max, uint, S_IRUGO);
 unsigned int glob_proc = 5;
 module_param(glob_proc, uint, S_IRUGO);
 
-/* TODO:
- * handling interrupt conditions
- */
-
 struct event {
 	char *name;
 	struct completion **wait;
@@ -124,7 +120,6 @@ int events_open(struct inode *inode, struct file *file)
  * WARNING - function dynamically allocates memory!
  * Remember to call free when obtained name string will not be used anymore!
  */
-
 char *events_get_name(const char __user *buf)
 {
 	int rt;
@@ -446,6 +441,8 @@ int events_set(struct events *cmc, const char __user *buf)
 	if (event != NULL) {
 		events_clean_event(event);
 		rt = events_add_task(event->proc_throws, glob_proc, current);
+		if (rt == -EINVAL)
+			rt = 0;
 		mutex_unlock(&cmc->lock);
 		kfree(name);
 		cmc->kmalloc_cnt--;
