@@ -24,7 +24,7 @@ int main(void)
 		if (rt)
 			break;
 	}
-	printf("proc1 stoped at %d event\n", i);
+	printf("proc1 stoped at %d event\n", i - 1);
 	for (int temp = 1; temp < 8; temp++) {
 		printf("proc1 - event_unset.\n");
 		rt = event_unset(events[temp - 1]);
