@@ -16,7 +16,11 @@ void proc2(char **events)
 	printf("proc2 - event_wait\n");
 	rt = event_wait(events[0]);
 	event_check_error_exit(rt, "proc2 - event_wait FAILURE");
-	printf("proc2 - exits, but should not\n");
+	rt = event_throw(events[1]);
+	event_check_error_exit(rt, "proc2 - event_throw");
+	rt = event_unset(events[1]);
+	event_check_error_exit(rt, "proc2 - event_unset");
+	printf("proc2 exits\n");
 	exit(0);	
 }
 
@@ -29,7 +33,9 @@ void proc3(char **events)
 	printf("proc3 - event_wait\n");
 	rt = event_wait(events[1]);
 	event_check_error_exit(rt, "proc3 - event_wait FAILURE");
-	printf("proc3 - exits, but should not\n");
+	rt = event_unset(events[2]);
+	event_check_error_exit(rt, "proc3 - event_unset");
+	printf("proc3 exits\n");
 	exit(0);	
 }
 
@@ -60,6 +66,11 @@ int main(void)
 	sleep(1);
 	printf("proc1 - event_wait - should fail\n");
 	rt = event_wait(events[2]);
-	event_check_error_exit(rt, "proc1 - event_wait SHOULD FAIL!");
-	printf("PROC3 NO FAILURE - WRONG\n");
+	event_check_error(rt, "proc1 - event_wait. Blad prawidlowy.");
+	rt = event_throw(events[0]);
+	event_check_error_exit(rt, "proc1 - event_throw");
+	rt = event_unset(events[0]);
+	event_check_error_exit(rt, "proc1 - event_unset");
+	printf("proc1 exits\n");
+	return 0;
 }
