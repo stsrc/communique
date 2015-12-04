@@ -22,8 +22,13 @@ void proc1(char *event)
 	}
 	printf("proc1 - event unset\n");
 	rt = event_unset(event);
-	event_check_error_exit(rt, "proc1 - event_unset");
-	printf("proc1 exits\n");
+	event_check_error(rt, "proc1 - event_unset");
+	while(rt < 0) {
+		event_throw(event);
+		rt = event_unset(event);
+		event_check_error(rt, "proc1 - event_unset");
+	}
+	printf("proc1 - exits\n");
 	exit(0);
 }
 
@@ -38,7 +43,22 @@ void proc2(char *event)
 		event_check_error(rt, "proc2 - event_wait");
 		cnt++;
 	}
-	printf("proc2 exits\n");
+	printf("proc2 - exits\n");
+	exit(0);
+}
+
+void proc3(char *event)
+{
+	int rt;
+	int cnt = 0;
+	while (cnt < 4) {
+		printf("proc3 - sleeps on event.\n");
+		rt = event_wait(event);
+		printf("proc3 - awaken.\n");
+		event_check_error(rt, "proc3 - event_wait\n");
+		cnt++;
+	}
+	printf("proc3 - exits.\n");
 	exit(0);
 }
 
@@ -53,6 +73,14 @@ int main(void)
 	switch(pid) {
 	case 0:
 		proc2(event);		
+		break;
+	default:
+		break;
+	}
+	pid = fork();
+	switch(pid) {
+	case 0: 
+		proc3(event);
 		break;
 	default:
 		break;

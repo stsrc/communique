@@ -241,7 +241,7 @@ struct event *events_get_event(struct events *cmc, const char __user *buf)
 	return event;
 }
 
-int events_unset_check_if_all_waits(struct events *cmc, 
+int events_unset_check_if_all_wait(struct events *cmc, 
 				    struct task_struct **proc_throws)
 {
 	struct event *temp;
@@ -266,7 +266,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 	if (event->s_comp) {
 		if (event->wait[0]->done)
 			return -EAGAIN;
-		rt = events_unset_check_if_all_waits(cmc, event->proc_throws);
+		rt = events_unset_check_if_all_wait(cmc, event->proc_throws);
 		if (rt)
 			return -EDEADLK;
 	} else if (event->g_comp) {
@@ -277,7 +277,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 			else if (temp->done)
 				return -EAGAIN;
 		}
-		rt = events_unset_check_if_all_waits(cmc, event->proc_throws);
+		rt = events_unset_check_if_all_wait(cmc, event->proc_throws);
 		if (rt)
 			return -EDEADLK;
 		return -EAGAIN;
@@ -424,7 +424,7 @@ int events_remove_abandonment(struct event *event)
 			events_remove_task(event->proc_throws, glob_proc, task);
 	}
 	rt = events_non_zero_task(event->proc_throws, glob_proc);
-	if (rt == 0)
+	if (!rt)
 		return -1;
 	else
 		return 0;
@@ -532,8 +532,6 @@ int events_wait(struct events *cmc, const char __user *buf)
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
-	if (!event->s_comp)
-		init_completion((struct completion *)event->wait[0]);
 	event->s_comp++;
 	rt = events_add_task(event->proc_waits, glob_proc, current);
 	if (rt) {
@@ -548,6 +546,7 @@ int events_wait(struct events *cmc, const char __user *buf)
 		mutex_unlock(&cmc->lock);
 		return -EDEADLK;
 	}
+	reinit_completion((struct completion *)event->wait[0]);
 	mutex_unlock(&cmc->lock);
 	rt = wait_for_completion_interruptible(event->wait[0]);
 	if (rt)
@@ -926,7 +925,7 @@ static void __exit events_exit(void)
 		events_diagnose_event(event);
 		events_remove_at_exit(&cmc, event);
 	}
-	if (cmc.kmalloc_cnt) {//MEMORY LEAK!!!
+	if (cmc.kmalloc_cnt) {
 		printk(KERN_EMERG "WARNING! MEMORY LEAK! "
 		       "cmc.kmalloc_cnt = %d\n", cmc.kmalloc_cnt);
 		debug_message();	
