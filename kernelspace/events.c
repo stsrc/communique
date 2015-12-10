@@ -437,7 +437,7 @@ void events_clean_event(struct event *event)
 		reinit_completion(event->wait[0]);
 }
 
-int events_set(struct events *cmc, const char __user *buf)
+int events_set(struct file *file, struct events *cmc, const char __user *buf)
 {
 	int rt;
 	struct event *event;
@@ -455,6 +455,7 @@ int events_set(struct events *cmc, const char __user *buf)
 		rt = events_add_task(event->proc_throws, glob_proc, current);
 		if (rt == -EINVAL)
 			rt = 0;
+		file->private_data = (void *)event;
 		mutex_unlock(&cmc->lock);
 		kfree(name);
 		cmc->kmalloc_cnt--;
@@ -467,6 +468,7 @@ int events_set(struct events *cmc, const char __user *buf)
 	if (event == NULL)
 		goto no_mem;
 	list_add(&event->element, &cmc->event_list);
+	file->private_data = (void *)event;
 	mutex_unlock(&cmc->lock);
 	return 0;
 no_mem:
@@ -520,18 +522,14 @@ int events_check_not_deadlock(struct events *cmc, struct task_struct
 	return 0;
 }
 
-int events_wait(struct events *cmc, const char __user *buf)
+int events_wait(struct file *file, struct events *cmc, const char __user *buf)
 {
 	int rt = 0;
 	struct event *event;
 	rt = mutex_lock_interruptible(&cmc->lock);
 	if (rt)
 		return -EINTR;
-	event = events_get_event(cmc, buf);
-	if (unlikely(event == NULL)) {
-		mutex_unlock(&cmc->lock);
-		return -EINVAL;
-	}
+	event = (struct *event)file->private_data;
 	event->s_comp++;
 	rt = events_add_task(event->proc_waits, glob_proc, current);
 	if (rt) {
@@ -762,7 +760,7 @@ ret:
 	return rt;
 }
 
-int events_throw(struct events *cmc, const char __user *buf)
+int events_throw(struct file *file, struct events *cmc, const char __user *buf)
 {
 	int rt;
 	struct event *event;
@@ -770,11 +768,7 @@ int events_throw(struct events *cmc, const char __user *buf)
 	if (rt)
 		return -EINTR;
 
-	event = events_get_event(cmc, buf);
-	if (unlikely(event == NULL)) {
-		mutex_unlock(&cmc->lock);
-		return -EINVAL;
-	}
+	event = (struct events *)file->private_data;
 	rt = events_search_task(event->proc_throws, glob_proc, current);
 	if (rt == -1) {
 		mutex_unlock(&cmc->lock);
@@ -800,21 +794,21 @@ int events_throw(struct events *cmc, const char __user *buf)
 	return 0;
 }
 
-long events_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+long events_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int rt;
 	switch(cmd) {
 	case SETEVENT:
-		rt = events_set(&cmc, (char __user *)arg);
+		rt = events_set(file, &cmc, (char __user *)arg);
 		return rt;
 	case WAITFOREVENT:
-		rt = events_wait(&cmc, (char __user *)arg);
+		rt = events_wait(file, &cmc, (char __user *)arg);
 		return rt;
 	case WEITINGROUP:
 		rt = events_group_wait(&cmc, (char __user *)arg);
 		return rt;
 	case THROWEVENT:
-		rt = events_throw(&cmc, (char __user *)arg);
+		rt = events_throw(file, &cmc, (char __user *)arg);
 		return rt;
 	case UNSETEVENT:
 		rt = events_unset(&cmc, (char __user *)arg);
