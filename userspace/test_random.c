@@ -60,7 +60,7 @@ void proc3(char *event)
 	srand((int)timespec.tv_nsec);
 	timespec.tv_sec = 0;
 	while(1) {
-		timespec.tv_nsec = rand()%50001;
+		timespec.tv_nsec = rand()%1001;
 		nanosleep(&timespec, NULL);
 		printf("proc3: event_set.\n");
 		eid = event_set(event);
@@ -68,17 +68,17 @@ void proc3(char *event)
 			while(1) { perror("proc3: event_set"); }
 		}
 		event_check_error_exit(rt, "proc3: event_set\n");
-		timespec.tv_nsec = rand()%50001;
+		timespec.tv_nsec = rand()%1001;
 		nanosleep(&timespec, NULL);
 		printf("proc3: event_wait\n");
 		rt = event_wait(eid);
 		event_check_error_exit(rt, "proc3: event_wait\n");
-		timespec.tv_nsec = rand()%50001;
+		timespec.tv_nsec = rand()%1001;
 		nanosleep(&timespec, NULL);
 		printf("proc3: event_throw\n");
 		rt = event_throw(eid);
 		event_check_error_exit(rt, "proc3: event_throw\n");
-		timespec.tv_nsec = rand()%50001;
+		timespec.tv_nsec = rand()%1001;
 		nanosleep(&timespec, NULL);
 		printf("proc3: event_unset\n");
 		rt = event_unset(eid);
