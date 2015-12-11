@@ -9,27 +9,41 @@
  */
 void proc2(char **events)
 {
-	int rt;
+	int e0, e1, rt;
 	printf("proc2 - event_set\n");
-	rt = event_set(events[1]);
-	event_check_error_exit(rt, "proc2 - event_set FAILURE");
+	e0 = event_set(events[0]);
+	e1 = event_set(events[1]);
+	event_check_error_exit(e0, "proc2 - event_set");
+	event_check_error_exit(e1, "proc2 - event_set");
 	printf("proc2 - event_wait\n");
-	rt = event_wait(events[0]);
-	event_check_error_exit(rt, "proc2 - event_wait FAILURE");
-	printf("proc2 - exits, but should not\n");
+	rt = event_wait(e0);
+	event_check_error_exit(rt, "proc2 - event_wait");
+	rt = event_throw(e1);
+	event_check_error_exit(rt, "proc2 - event_throw");
+	e1 = event_unset(e1);
+	event_check_error_exit(e1, "proc2 - event_unset");
+	e0 = event_unset(e0);
+	event_check_error_exit(e0, "proc2 - event_unset");
+	printf("proc2 exits\n");
 	exit(0);	
 }
 
 void proc3(char **events)
 {
-	int rt;
+	int rt, e1, e2;
 	printf("proc3 - event_set\n");
-	rt = event_set(events[2]);
-	event_check_error_exit(rt, "proc3 - event_set FAIULRE");
+	e2 = event_set(events[2]);
+	e1 = event_set(events[1]);
+	event_check_error_exit(e1, "proc3 - event_set");
+	event_check_error_exit(e2, "proc3 - event_set");
 	printf("proc3 - event_wait\n");
-	rt = event_wait(events[1]);
-	event_check_error_exit(rt, "proc3 - event_wait FAILURE");
-	printf("proc3 - exits, but should not\n");
+	rt = event_wait(e1);
+	event_check_error_exit(rt, "proc3 - event_wait");
+	rt = event_unset(e2);
+	event_check_error_exit(rt, "proc3 - event_unset");
+	rt = event_unset(e1);
+	event_check_error_exit(rt, "proc3 - event_unset");
+	printf("proc3 exits\n");
 	exit(0);	
 }
 
@@ -37,29 +51,43 @@ int main(void)
 {
 	char *events[] = {"a\0", "b\0", "c\0"};
 	pid_t pid;
-	printf("proc1 - exits, event_set\n");
-	int rt = event_set(events[0]);
-	event_check_error_exit(rt, "proc1 - event_set. SHOULD NOT FAIL!");
+	int e0, e1, e2, rt;
 	pid = fork();
 	switch(pid) {
 	case 0:
+		sleep(1);
 		proc2(events);
 		break;
 	default:
 		break;
 	}
-	sleep(1);
 	pid = fork();
 	switch (pid) {
 	case 0:
+		sleep(2);
 		proc3(events);
 		break;
 	default:
 		break;
 	}
-	sleep(1);
-	printf("proc1 - event_wait - should fail\n");
-	rt = event_wait(events[2]);
-	event_check_error_exit(rt, "proc1 - event_wait SHOULD FAIL!");
-	printf("PROC3 NO FAILURE - WRONG\n");
+	printf("proc1 - event_set\n");
+	e0 = event_set(events[0]);
+	event_check_error_exit(e0, "proc1 - event_set");
+	e1 = event_set(events[1]);
+	event_check_error_exit(e1, "proc1 - event_set");
+	e2 = event_set(events[2]);
+	sleep(5);
+	printf("proc1 - event_wait - powinien pojawic sie blad\n");
+	rt = event_wait(e2);
+	event_check_error(rt, "proc1 - event_wait. Blad prawidlowy.");
+	rt = event_throw(e0);
+	event_check_error_exit(rt, "proc1 - event_throw");
+	rt = event_unset(e0);
+	event_check_error_exit(rt, "proc1 - event_unset");
+	rt = event_unset(e1);
+	event_check_error_exit(rt, "proc1 - event_unset");
+	rt = event_unset(e2);
+	event_check_error_exit(rt, "proc1 - event_unset");
+	printf("proc1 exits\n");
+	return 0;
 }

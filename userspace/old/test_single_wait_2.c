@@ -22,7 +22,12 @@ void proc1(char *event)
 	}
 	printf("proc1 - event unset\n");
 	rt = event_unset(event);
-	event_check_error_exit(rt, "proc1 - event_unset");
+	event_check_error(rt, "proc1 - event_unset");
+	while(rt < 0) {
+		event_throw(event);
+		rt = event_unset(event);
+		event_check_error(rt, "proc1 - event_unset");
+	}
 	printf("proc1 - exits\n");
 	exit(0);
 }

@@ -16,20 +16,23 @@ void proc1(char **events)
 	sleep(2); //assurance of proc2 being in waiting state
 	printf("proc1: event_wait_group.\n");
 	rt = event_wait_group(events, 4);
-	event_check_error_exit(rt, "proc1: event_wait FAILED - SHOULD FAIL!");
+	event_check_error(rt, "proc1: event_wait FAILED - blad oczekiwany!");
+	printf("proc1: event_throw event0\n");
+	rt = event_throw(events[0]);
+	event_check_error_exit(rt, "proc1: event_throw event0");
 	printf("proc1: event_unset a\n");
 	rt = event_unset(events[0]);
-	event_check_error(rt, "proc1: event_unset event0");
+	event_check_error_exit(rt, "proc1: event_unset event0");
 	printf("proc1: event_unset b\n");
 	rt = event_unset(events[1]);
-	event_check_error(rt, "proc1: event_unset event1");
+	event_check_error_exit(rt, "proc1: event_unset event1");
 	printf("proc1: event_unset c\n");
 	rt = event_unset(events[2]);
-	event_check_error(rt, "proc1: event_unset event2");
+	event_check_error_exit(rt, "proc1: event_unset event2");
 	printf("proc1: event_unset d\n");
 	rt = event_unset(events[3]);
-	event_check_error(rt, "proc1: event_unset event3");
-	printf("proc1 kill\n");
+	event_check_error_exit(rt, "proc1: event_unset event3");
+	printf("proc1 exits\n");
 	exit(0);
 }
 
@@ -56,14 +59,14 @@ void proc2(char **events)
 	event_check_error_exit(rt, "proc2: event_unset");
 	printf("proc2: event_unset b\n");
 	rt = event_unset(events[1]);
-	event_check_error_exit(rt, "proc2: event_set");
+	event_check_error_exit(rt, "proc2: event_unset");
 	printf("proc2: event_unset c\n");
 	rt = event_unset(events[2]);
 	event_check_error_exit(rt, "proc2: event_unset");
 	printf("proc2: event_unset d\n");
 	rt = event_unset(events[3]);
 	event_check_error_exit(rt, "proc2: event_unset");
-	printf("proc2 kill\n");
+	printf("proc2 exits\n");
 	exit(0);
 }
 
