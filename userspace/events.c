@@ -1,10 +1,11 @@
 #include "events.h"
 
-#define SETEVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x01
-#define WAITFOREVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x02
-#define	THROWEVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x03
-#define	UNSETEVENT (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x04
-#define WAITINGROUP (1 << 30) | (sizeof(char *) << 16) | (0x8A << 8) | 0x05 
+#define SETEVENT _IOW(0x8A, 0x01, sizeof(char *))
+#define WAITFOREVENT _IOW(0x8A, 0x02, sizeof(char *))
+#define THROWEVENT _IOW(0x8A, 0x03, sizeof(char *))
+#define UNSETEVENT _IOW(0x8A, 0x04, sizeof(char *))
+#define WAITINGROUP _IOW(0x8A, 0x05, sizeof(char *))
+
 
 static inline int event_open()
 {
@@ -18,9 +19,8 @@ int event_get_name_len()
 	int rt;	
 	memset(value, 0, sizeof(value));
 	fd = open("/sys/module/events/parameters/glob_name_size\0", O_RDONLY);
-	if (fd < 0) {
+	if (fd < 0)
 		return fd;
-	}
 	rt = read(fd, value, sizeof(value));
 	if (rt < 0) {
 		errno = EAGAIN;
@@ -53,54 +53,33 @@ int event_set(char *name)
 	if (rt)
 		return rt;
 	rt = ioctl(fd, SETEVENT, name);
-	close(fd);
+	if (!rt)
+		rt = fd;
+	else
+		close(fd);
 	return rt;
 }
 
-int event_unset(char *name)
+int event_unset(int event_num)
 {
-	int rt, fd;
-	fd = event_open();
-	if (fd < 0)
-		return fd;
-	rt = event_check_name(name);
-	if (rt)
-		return rt;
-	rt = ioctl(fd, UNSETEVENT, name);
+	int rt;	
+	rt = ioctl(event_num, UNSETEVENT);
 	while (rt && (errno == EAGAIN)) {
 		sleep(1);
-		rt = ioctl(fd, UNSETEVENT, name);
+		rt = ioctl(event_num, UNSETEVENT);
 	}
-	close(fd);
+	close(event_num);
 	return rt;
 }
 
-int event_throw(char *name)
+inline int event_throw(int event_num)
 {
-	int rt, fd;
-	fd = event_open();
-	if (fd < 0)
-		return 1;
-	rt = event_check_name(name);
-	if (rt)
-		return rt;
-	rt = ioctl(fd, THROWEVENT, name);
-	close(fd);
-	return rt;
+	return ioctl(event_num, THROWEVENT);
 }
 
-int event_wait(char *name)
+inline int event_wait(int event_num)
 {
-	int rt, fd;
-	fd = event_open();
-	if (fd < 0)
-		return 1;
-	rt = event_check_name(name);
-	if (rt)
-		return rt;
-	rt = ioctl(fd, WAITFOREVENT, name);
-	close(fd);
-	return rt;
+	return ioctl(event_num, WAITFOREVENT);
 }
 
 struct wait_group {
