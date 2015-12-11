@@ -106,8 +106,16 @@ void events_diagnose_event(struct event *event)
 	}
 }
 
+ssize_t events_remove_task(struct task_struct **arr, ssize_t size,
+			   struct task_struct *task);
+
 int events_release(struct inode *inode, struct file *file)
 {
+	struct event *event = NULL;
+	if (file->private_data != NULL) {
+		event = (struct event *)file->private_data;
+		events_remove_task(event->proc_throws, glob_proc, current);
+	}
 	return 0;
 }
 
@@ -341,11 +349,9 @@ int events_unset(struct file *file, struct events *cmc)
 		goto ret;
 	events_remove_task(event->proc_throws, glob_proc, current);
 	rt = events_non_zero_task(event->proc_throws, glob_proc);
+	file->private_data = NULL;
 	if (rt > 0) {
 		rt = 0;
-		goto ret;
-	} else if (rt < 0) {
-		rt = -EINVAL;
 		goto ret;
 	}
 	events_delete_event(cmc, event);
@@ -409,32 +415,6 @@ err:
 	return NULL;
 }
 
-int events_remove_abandonment(struct event *event)
-{
-	int rt;
-	struct task_struct *task;
-	for (unsigned int i = 0; i < glob_proc; i++) {
-		task = event->proc_throws[i];
-		if (task == NULL)
-			continue;
-		//rt = pid_alive(task);
-		//if (!rt)
-		//	events_remove_task(event->proc_throws, glob_proc, task);
-	}
-	rt = events_non_zero_task(event->proc_throws, glob_proc);
-	if (!rt)
-		return -1;
-	else
-		return 0;
-}
-
-void events_clean_event(struct event *event)
-{
-	int rt = events_remove_abandonment(event);
-	if (rt < 0)
-		reinit_completion(event->wait[0]);
-}
-
 int events_set(struct file *file, struct events *cmc, const char __user *buf)
 {
 	int rt;
@@ -449,7 +429,6 @@ int events_set(struct file *file, struct events *cmc, const char __user *buf)
 	}
 	event = events_search(cmc, name);
 	if (event != NULL) {
-		events_clean_event(event);
 		rt = events_add_task(event->proc_throws, glob_proc, current);
 		if (rt == -EINVAL)
 			rt = 0;
@@ -782,7 +761,7 @@ int events_throw(struct file *file, struct events *cmc)
 	if (event->g_comp) {
 		for(unsigned int i = 1; i < glob_compl_cnt_max; i++) {
 			if (event->wait[i] != NULL) {
-				if (event->wait[i]->done) //Po co ja to napisalem?
+				if (completion_done(event->wait[i]))
 					continue;
 				complete_all(event->wait[i]);
 				event->completed_by[i] = event->name;

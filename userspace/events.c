@@ -68,7 +68,8 @@ int event_unset(int event_num)
 		sleep(1);
 		rt = ioctl(event_num, UNSETEVENT);
 	}
-	close(event_num);
+	if (!rt)
+		close(event_num);
 	return rt;
 }
 

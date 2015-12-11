@@ -4,10 +4,19 @@
 #include <stdlib.h>
 #include <time.h>
 
-/*
- * TEST SCENARIO:
- *2 processes - proc1 and proc2 - talking (one sends, second waits)
- */
+void print_test_scenario()
+{
+	printf("\nTest scenario:\n\n");
+	printf("process 1 - sends event \"a\"\n");
+	printf("process 2 - waits for event \"a\"\n");
+	printf("process 3 - sets event, throws event, waits for "
+	       "event and unsets event in one loop iteration\n\n");
+	printf("To exit program hit ctrl+c. " 
+	       "Driver should stay stable after program termination\n\n");
+	printf("To start program press any key.\n");
+	getchar();
+	printf("\n\n");
+}
 
 void proc1(char *event)
 {
@@ -95,6 +104,7 @@ int main(void)
 {
 	char event[2] = "a\0";
 	pid_t pid;
+	print_test_scenario();
 	pid = fork();
 	switch(pid) {
 	case 0:
