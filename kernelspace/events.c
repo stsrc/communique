@@ -516,8 +516,8 @@ int events_wait(struct file *file, struct events *cmc)
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
-	reinit_completion(event->wait[0]);
 	event->s_comp++;
+	reinit_completion(event->wait[0]);
 	rt = events_add_task(event->proc_waits, glob_proc, current);
 	if (rt) {
 		event->s_comp--;

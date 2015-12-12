@@ -16,8 +16,9 @@ void print_test_scenario()
 	printf("proc1 sets four events: \"a\", \"b\", \"c\", \"d\".\n");
 	printf("proc2 sets the same events.\n");
 	printf("proc2 waits for one of four events as a first. When proc2 sleeps, "
-	       "proc1 tries to wait in the same way, what causes deadlock");
-	printf(" error.\n\nPress enter to start\n");
+	       "proc1 tries to wait in the same way, what causes deadlock\n");
+	printf("proc1 event_wait should return error about deadlock.\n\n");
+	printf("Press enter to start.\n");
 	getchar();
 }
 void proc1(char **events)

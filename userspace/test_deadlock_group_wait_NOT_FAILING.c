@@ -16,7 +16,8 @@ void print_test_scenario()
 	printf("proc1 waits for one of the four events: a, b, c, d\n");
 	printf("proc2 waits for one of the three events: a, b, d\n");
 	printf("proc3 just throws. Firstly throws event c, secondly throws"
-	       " event a.\n\n");
+	       " event a.\n");
+	printf("Test shows algorithm accuracy.\n\n");
 	printf("To start press enter.\n");
 	getchar();
 }

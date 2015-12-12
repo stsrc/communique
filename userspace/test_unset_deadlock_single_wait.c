@@ -39,7 +39,6 @@ void print_test_scenario()
 	printf("12. Processes exits\n\n");
 	printf("To start press Enter\n");
 	getchar();
-	printf("\n");
 }
 
 void proc1()
