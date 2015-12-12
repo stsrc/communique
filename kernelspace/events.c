@@ -247,7 +247,7 @@ struct event *events_get_event(struct events *cmc, const char __user *buf)
 	return event;
 }
 
-int events_unset_check_if_all_wait(struct events *cmc, 
+int events_unset_check_if_rest_wait(struct events *cmc, 
 				   struct task_struct **proc_throws)
 {
 	struct event *temp;
@@ -272,7 +272,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 	if (event->s_comp) {
 		if (completion_done(event->wait[0]))
 			return -EAGAIN;
-		rt = events_unset_check_if_all_wait(cmc, event->proc_throws);
+		rt = events_unset_check_if_rest_wait(cmc, event->proc_throws);
 		if (rt)
 			return -EDEADLK;
 	} else if (event->g_comp) {
@@ -283,7 +283,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 			else if (completion_done(temp))
 				return -EAGAIN;
 		}
-		rt = events_unset_check_if_all_wait(cmc, event->proc_throws);
+		rt = events_unset_check_if_rest_wait(cmc, event->proc_throws);
 		if (rt)
 			return -EDEADLK;
 		return -EAGAIN;
