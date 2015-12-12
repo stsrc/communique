@@ -21,7 +21,7 @@ void proc1(char *event)
 	event_check_error(e0, "main: event_set");
 	int cnt = 0;
 	int rt = 0;
-	sleep(2);
+	sleep(1);
 	while(cnt < 4) {
 		sleep(2);
 		printf("proc1 - event_throw(a)\n");
@@ -50,7 +50,6 @@ void proc2(char *event)
 	int e0 = event_set(event);
 	event_check_error_exit(e0, "proc2 - event_set");
 	while(cnt < 4) {
-		sleep(1);
 		printf("proc2 - event_wait(a)\n");
 		rt = event_wait(e0);
 		event_check_error(rt, "proc2 - event_wait");
@@ -72,7 +71,6 @@ void proc3(char *event)
         e0 = event_set(event);
 	event_check_error_exit(e0, "proc3 - event_set");
 	while (cnt < 4) {
-		sleep(1);
 		printf("proc3 - event_wait(a)\n");
 		rt = event_wait(e0);
 		event_check_error(rt, "proc3 - event_wait\n");
