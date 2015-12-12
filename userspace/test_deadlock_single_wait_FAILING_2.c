@@ -13,6 +13,8 @@ void print_test_scenario()
 	printf("proc1 and proc2 sets event \"a\"\n");
 	printf("proc2 waits as a first for event \"a\"\n");
 	printf("proc1 tries to wait for \"a\" what is causing error.\n\n");
+	printf("Press enter to start.\n");
+	getchar();
 }
 
 void proc2(char *event)
@@ -21,10 +23,10 @@ void proc2(char *event)
 	printf("proc2 - event_set(\"a\")\n");
 	e0 = event_set(event);
 	event_check_error_exit(e0, "proc2 - event_set");
-	printf("proc2 - event_wait(e0)\n");
+	printf("proc2 - event_wait(\"a\")\n");
 	rt = event_wait(e0);
 	event_check_error_exit(rt, "proc2 - event_wait");
-	printf("proc2 - event_unset(e0)\n");
+	printf("proc2 - event_unset(\"a\")\n");
 	e0 = event_unset(e0);
 	event_check_error_exit(e0, "proc2 - event_unset");
 	printf("proc2 exits\n");
@@ -51,13 +53,13 @@ int main(void)
 	e0 = event_set(event);
 	event_check_error_exit(e0, "proc1 - event_set");
 	sleep(2);
-	printf("proc1 - event_wait(e0) - powinien pojawic sie blad\n");
+	printf("proc1 - event_wait(\"a\") - should fail\n");
 	rt = event_wait(e0);
-	event_check_error(rt, "proc1 - event_wait. Blad prawidlowy.");
-	printf("proc1 - event_throw(e0)\n");
+	event_check_error(rt, "proc1 - event_wait. Positive fail");
+	printf("proc1 - event_throw(\"a\")\n");
 	rt = event_throw(e0);
 	event_check_error_exit(rt, "proc1 - event_throw");
-	printf("proc1 - event_unset(e0)\n");
+	printf("proc1 - event_unset(\"a\")\n");
 	rt = event_unset(e0);
 	event_check_error_exit(rt, "proc1 - event_unset");
 	printf("proc1 exits\n");

@@ -12,7 +12,9 @@ void print_test_scenario()
 	printf("\nTest scenario:\n\n");
 	printf("process 1 - sends event \"a\" 4 times\n");
 	printf("process 2 - captures event \"a\" 4 times\n");
-	printf("on exit both processes unsets event and exits\n\n");
+	printf("On exit both processes unsets event and exits\n\n");
+	printf("To start press enter.\n");
+	getchar();
 }
 
 void proc1(char *event)

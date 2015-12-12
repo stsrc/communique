@@ -12,11 +12,13 @@
 
 void print_test_scenario()
 {
-	printf("\ntest scenario:\n\n");
+	printf("\nTest scenario:\n\n");
 	printf("proc1 waits for one of the four events: a, b, c, d\n");
 	printf("proc2 waits for one of the three events: a, b, d\n");
 	printf("proc3 just throws. Firstly throws event c, secondly throws"
 	       " event a.\n\n");
+	printf("To start press enter.\n");
+	getchar();
 }
 
 void proc1(char **events)
@@ -54,6 +56,7 @@ void proc2(char **events)
 {
 	int rt, e0, e1, e2, e3;
 	char *events_2[] = {events[0], events[1], events[3]};
+	printf("proc2: event_set.\n");
 	e0 = event_set(events[0]);
 	event_check_error_exit(e0, "proc2: event_set");
 	e1 = event_set(events[1]);
@@ -83,6 +86,7 @@ void proc2(char **events)
 void proc3(char **events)
 {
 	int rt, e0, e1, e2, e3;
+	printf("proc3: event_set.\n");
 	e0 = event_set(events[0]);
 	event_check_error_exit(e0, "proc3: event_set");
 	e1 = event_set(events[1]);

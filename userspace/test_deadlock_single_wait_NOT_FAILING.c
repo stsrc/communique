@@ -2,6 +2,21 @@
 #include <unistd.h>
 #include "events.h"
 
+void print_test_scenario()
+{
+	printf("\nTest scenario:\n\n");
+	printf("proc2: sets events: \"a\", \"b\". Firstly waits for event"
+	       " \"a\", then throws event \"b\" and exits.\n");
+	printf("proc3: sets events: \"b\", \"c\". Process waits for event"
+	       " \"b\" and exits.\n");
+	printf("proc4: sets event \"c\". Process throws event \"c\" and exits.\n");
+	printf("proc1: sets events: \"a\", \"c\". Firstly waits for event "
+	       "\"c\", secondly throws event \"a\", thirdly exits.\n");
+	printf("On exit all processes unset related events.\n\n");
+	printf("To start press enter.\n");
+	getchar();
+}
+
 void proc2(char **events)
 {
 	int rt, e0, e1;
@@ -67,6 +82,7 @@ int main(void)
 	char *events[] = {"a\0", "b\0", "c\0"};
 	pid_t pid;
 	int rt, e0, e2;
+	print_test_scenario();
 	pid = fork();
 	switch(pid) {
 	case 0:

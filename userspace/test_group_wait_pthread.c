@@ -99,6 +99,7 @@ int main(void)
 	event_check_error(rt, "thread 1: event_unset event2");
 	rt = event_unset(e3);
 	event_check_error(rt, "thread 1: event_unset event3");
+	sleep(1);
 	printf("thread 1: returning\n");
 	return 0;
 }

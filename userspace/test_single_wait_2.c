@@ -23,7 +23,7 @@ void proc1(char *event)
 	int rt = 0;
 	sleep(2);
 	while(cnt < 4) {
-		sleep(1);
+		sleep(2);
 		printf("proc1 - event_throw(a)\n");
 		rt = event_throw(e0);
 		event_check_error(rt, "proc1 - event_throw");

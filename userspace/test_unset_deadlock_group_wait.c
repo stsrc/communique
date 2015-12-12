@@ -17,7 +17,7 @@ void print_test_scenario()
 	printf("proc1 waits for on of the four events: a, b, c, d\n");
 	printf("proc2 waits for on of the three events: a, b, d\n");
 	printf("proc3 tries to unset event c, what is causing deadlock detection\n");
-	printf("proc3 throws event c and event a\n");
+	printf("proc3 then throws event c and event a\n");
 	printf("Processes unset events and exit\n\n");
 	printf("Press enter to start\n");
 	getchar();

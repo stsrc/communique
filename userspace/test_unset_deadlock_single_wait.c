@@ -107,9 +107,11 @@ void proc3()
 	event_check_error_exit(rt, "proc3 - event_throw");
 	printf("8. proc3 - event_unset\n");
 	rt = event_unset(e0);
-	event_check_error_exit(rt, "proc3 - event_unset");
+	while (rt < 0)
+		rt = event_unset(e0);
+	event_check_error_exit(rt, "proc3 - event_unset - e0");
 	rt = event_unset(e1);
-	event_check_error_exit(rt, "proc3 - event_unset");
+	event_check_error_exit(rt, "proc3 - event_unset - e1");
 	printf("12. proc3 - exit(0)\n");
 	exit(0);
 }

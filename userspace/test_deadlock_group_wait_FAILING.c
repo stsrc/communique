@@ -13,10 +13,12 @@
 void print_test_scenario()
 {
 	printf("\nTest scenario:\n\n");
-	printf("proc1 waits for one of four events: \"a\", \"b\", \"c\", \"d\".\n");
-	printf("proc2 waits for the same events\n");
-	printf("proc2 waits first. On waiting proc2, proc1 tries to waits.\n");
-	printf("It causes deadlock error to occure\n\n");
+	printf("proc1 sets four events: \"a\", \"b\", \"c\", \"d\".\n");
+	printf("proc2 sets the same events.\n");
+	printf("proc2 waits for one of four events as a first. When proc2 sleeps, "
+	       "proc1 tries to wait in the same way, what causes deadlock");
+	printf(" error.\n\nPress enter to start\n");
+	getchar();
 }
 void proc1(char **events)
 {
@@ -34,10 +36,10 @@ void proc1(char **events)
 	e3 = event_set(events[3]);
 	event_check_error_exit(e3, "proc1: event_set");
 	sleep(2); //assurance of proc2 being in waiting state
-	printf("proc1: event_wait_group.\n");
+	printf("proc1: event_wait_group - should fail\n");
 	rt = event_wait_group(events, 4);
-	event_check_error(rt, "proc1: event_wait FAILED - blad oczekiwany!");
-	printf("proc1: event_throw event0\n");
+	event_check_error(rt, "proc1: event_wait, positive fail");
+	printf("proc1: event_throw a\n");
 	rt = event_throw(e0);
 	event_check_error_exit(rt, "proc1: event_throw event0");
 	printf("proc1: event_unset a\n");
@@ -52,6 +54,7 @@ void proc1(char **events)
 	printf("proc1: event_unset d\n");
 	rt = event_unset(e3);
 	event_check_error_exit(rt, "proc1: event_unset event3");
+	sleep(1);
 	printf("proc1 exits\n");
 	exit(0);
 }
@@ -71,7 +74,7 @@ void proc2(char **events)
 	printf("proc2: event_set d\n");
 	e3 = event_set(events[3]);
 	event_check_error_exit(e3, "proc2: event_set");	
-	printf("proc2: event_wait_group.\n");
+	printf("proc2: event_wait_group\n");
 	rt = event_wait_group(events, 4);
 	event_check_error_exit(rt, "proc2: event_wait_group. SHOULD NOT FAIL");
 	printf("proc2: event_unset a\n");

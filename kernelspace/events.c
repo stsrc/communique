@@ -111,7 +111,7 @@ void events_diagnose_event(struct event *event)
 int events_release(struct inode *inode, struct file *file)
 {
 	struct event *event = NULL;
-	if (file->private_data != NULL) {
+	if (unlikely(file->private_data != NULL)) {
 		event = (struct event *)file->private_data;
 		events_remove_task(event->proc_throws, glob_proc, current);
 	}
@@ -300,7 +300,7 @@ static inline int events_unset_check(struct events *cmc, struct event *event)
 	rt = -EAGAIN;
 	while(rt == -EAGAIN) {
 		rt = events_unset_check_deadlock(cmc, event);
-		if (rt == -EAGAIN) { //NOTE: not the best solution
+		if (rt == -EAGAIN) {
 			mutex_unlock(&cmc->lock);
 			mutex_lock(&cmc->lock);
 		}
@@ -354,8 +354,8 @@ int events_unset(struct file *file, struct events *cmc)
 	if (rt < 0)
 		goto ret;
 	events_remove_task(event->proc_throws, glob_proc, current);
-	rt = events_non_zero_task(event->proc_throws, glob_proc);
 	file->private_data = NULL;
+	rt = events_non_zero_task(event->proc_throws, glob_proc);
 	if (rt > 0) {
 		rt = 0;
 		goto ret;
@@ -516,6 +516,7 @@ int events_wait(struct file *file, struct events *cmc)
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
+	reinit_completion(event->wait[0]);
 	event->s_comp++;
 	rt = events_add_task(event->proc_waits, glob_proc, current);
 	if (rt) {
@@ -530,7 +531,6 @@ int events_wait(struct file *file, struct events *cmc)
 		mutex_unlock(&cmc->lock);
 		return -EDEADLK;
 	}
-	reinit_completion((struct completion *)event->wait[0]);
 	mutex_unlock(&cmc->lock);
 	rt = wait_for_completion_interruptible(event->wait[0]);
 	if (rt)
