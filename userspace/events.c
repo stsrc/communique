@@ -64,10 +64,6 @@ int event_unset(int event_num)
 {
 	int rt;	
 	rt = ioctl(event_num, UNSETEVENT);
-	while (rt && (errno == EAGAIN)) {
-		sleep(1);
-		rt = ioctl(event_num, UNSETEVENT);
-	}
 	if (!rt)
 		close(event_num);
 	return rt;

@@ -96,9 +96,9 @@ int main(void)
 	printf("proc1 - event_set(events[2])\n");
 	e2 = event_set(events[2]);
 	sleep(5);
-	printf("proc1 - event_wait(e2) - powinien pojawic sie blad\n");
+	printf("proc1 - event_wait(e2) - deadlock error should occure\n");
 	rt = event_wait(e2);
-	event_check_error(rt, "proc1 - event_wait. Blad prawidlowy.");
+	event_check_error(rt, "proc1 - event_wait. Positive fail");
 	rt = event_throw(e0);
 	event_check_error_exit(rt, "proc1 - event_throw");
 	rt = event_unset(e0);
@@ -107,6 +107,7 @@ int main(void)
 	event_check_error_exit(rt, "proc1 - event_unset");
 	rt = event_unset(e2);
 	event_check_error_exit(rt, "proc1 - event_unset");
+	sleep(1);
 	printf("proc1 exits\n");
 	return 0;
 }

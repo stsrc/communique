@@ -21,7 +21,7 @@ void proc2(char **events)
 	event_check_error_exit(rt, "proc2 - event_unset");
 	rt = event_unset(e0);
 	event_check_error_exit(rt, "proc2 - event_unset");
-	printf("proc2 - dead\n");
+	printf("proc2 - exits\n");
 	exit(0);	
 }
 
@@ -41,7 +41,7 @@ void proc3(char **events)
 	event_check_error_exit(rt, "proc3 - event_unset");
 	rt = event_unset(e1);
 	event_check_error_exit(rt, "proc3 - event_unset");
-	printf("proc3 - dead\n");
+	printf("proc3 - exits\n");
 	exit(0);	
 }
 
@@ -58,7 +58,7 @@ void proc4(char **events)
 	printf("proc4 - event_unset\n");
 	rt = event_unset(e2);
 	event_check_error_exit(rt, "proc4 - event_unset");
-	printf("proc4 - dead\n");
+	printf("proc4 - exits\n");
 	exit(0);
 }
 
@@ -111,6 +111,7 @@ int main(void)
 	event_check_error_exit(rt, "proc1 - event_unset");	
 	rt = event_unset(e2);
 	event_check_error_exit(rt, "proc1 - event_unset");
-	printf("proc1 - dead\n");
+	printf("proc1 - exits\n");
+	sleep(1);
 	return 0;
 }

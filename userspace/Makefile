@@ -1,6 +1,6 @@
 CC = gcc
 
-CFLAGS := -O3 -Wall -std=gnu99
+CFLAGS := -O3 -Wall -std=gnu99 -lpthread
 SRCFILES := $(wildcard test*.c)
 OBJFILES := $(patsubst %.c, %.o, $(SRCFILES)) events.o
 PROGFILES := $(patsubst %.c, %, $(SRCFILES))

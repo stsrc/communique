@@ -37,7 +37,7 @@ void print_test_scenario()
 	printf("10. proc1 unsets event a and b\n");
 	printf("11. proc2 unsets event a\n");
 	printf("12. Processes exits\n\n");
-	printf("To start press any button\n");
+	printf("To start press Enter\n");
 	getchar();
 	printf("\n");
 }
@@ -52,7 +52,7 @@ void proc1()
 	event_check_error_exit(e0, "proc1 - event_set");
 	e1 = event_set(eventb);
 	event_check_error_exit(e1, "proc1 - event_set");
-	sleep(4);
+	sleep(3);
 	printf("5. proc1 - event_wait\n");
 	rt = event_wait(e1);
 	event_check_error_exit(rt, "proc1 - event_wait");
@@ -98,7 +98,7 @@ void proc3()
 	event_check_error_exit(e0, "proc3 - event_set");
 	e1 = event_set(eventb);
 	event_check_error_exit(e1, "proc3 - event_set");
-	sleep(10);
+	sleep(3);
 	printf("6. proc3 - event_unset, should fail\n");
 	rt = event_unset(e0);
 	event_check_error(rt, "proc3 - event_unset, positive fail");

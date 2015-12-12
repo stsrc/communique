@@ -71,6 +71,8 @@ struct events {
 static struct events cmc;
 struct event *events_check_if_proc_waits(struct events *cmc, 
 					 struct task_struct *task);
+ssize_t events_remove_task(struct task_struct **arr, ssize_t size,
+			   struct task_struct *task);
 
 static inline void generate_oops(void)
 {
@@ -105,9 +107,6 @@ void events_diagnose_event(struct event *event)
 		       i, (unsigned long)event->proc_waits[i]);
 	}
 }
-
-ssize_t events_remove_task(struct task_struct **arr, ssize_t size,
-			   struct task_struct *task);
 
 int events_release(struct inode *inode, struct file *file)
 {
@@ -271,7 +270,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 	if (!(event->s_comp || event->g_comp))
 		return 0;
 	if (event->s_comp) {
-		if (event->wait[0]->done)
+		if (completion_done(event->wait[0]))
 			return -EAGAIN;
 		rt = events_unset_check_if_all_wait(cmc, event->proc_throws);
 		if (rt)
@@ -281,7 +280,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 			temp = event->wait[i];
 			if (temp == NULL)
 				continue;
-			else if (temp->done)
+			else if (completion_done(temp))
 				return -EAGAIN;
 		}
 		rt = events_unset_check_if_all_wait(cmc, event->proc_throws);
@@ -298,7 +297,14 @@ static inline int events_unset_check(struct events *cmc, struct event *event)
 	rt = events_search_task(event->proc_throws, glob_proc, current);
 	if (rt == -1)
 		return -EACCES;
-	rt = events_unset_check_deadlock(cmc, event);
+	rt = -EAGAIN;
+	while(rt == -EAGAIN) {
+		rt = events_unset_check_deadlock(cmc, event);
+		if (rt == -EAGAIN) { //NOTE: not the best solution
+			mutex_unlock(&cmc->lock);
+			mutex_lock(&cmc->lock);
+		}
+	}
 	return rt;
 }
 

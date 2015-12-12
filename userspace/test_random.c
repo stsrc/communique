@@ -7,13 +7,13 @@
 void print_test_scenario()
 {
 	printf("\nTest scenario:\n\n");
-	printf("process 1 - sends event \"a\"\n");
-	printf("process 2 - waits for event \"a\"\n");
+	printf("process 1 - sends event \"a\".\n");
+	printf("process 2 - waits for event \"a\".\n");
 	printf("process 3 - sets event, throws event, waits for "
-	       "event and unsets event in one loop iteration\n\n");
+	       "event and unsets event in one loop iteration.\n\n");
 	printf("To exit program hit ctrl+c. " 
-	       "Driver should stay stable after program termination\n\n");
-	printf("To start program press any key.\n");
+	       "Driver should be still stable after program termination.\n\n");
+	printf("To start program press enter.\n");
 	getchar();
 	printf("\n\n");
 }
@@ -28,7 +28,7 @@ void proc1(char *event)
 	srand((int)timespec.tv_nsec);
 	timespec.tv_sec = 0;
 	while(1) {
-		timespec.tv_nsec = rand()%2000001;
+		timespec.tv_nsec = 20000000 + rand()%4000001;
 		nanosleep(&timespec, NULL);
 		printf("proc1: event_throw.\n");
 		rt = event_throw(eid);
@@ -36,7 +36,7 @@ void proc1(char *event)
 			continue;
 		event_check_error_exit(rt, "proc1 - event_throw");
 	}
-	printf("proc1 - event unset\n");
+	printf("proc1 - event unset.\n");
 	rt = event_unset(eid);
 	event_check_error_exit(rt, "proc1 - event_unset");
 	exit(0);
@@ -52,7 +52,7 @@ void proc2(char *event)
 	srand((int)timespec.tv_nsec);
 	timespec.tv_sec = 0;
 	while(1) {
-		timespec.tv_nsec = rand()%1000001;
+		timespec.tv_nsec = 20000000 + rand()%1000001;
 		nanosleep(&timespec, NULL);
 		printf("proc2: event_wait.\n");	
 		rt = event_wait(eid);
@@ -69,7 +69,7 @@ void proc3(char *event)
 	srand((int)timespec.tv_nsec);
 	timespec.tv_sec = 0;
 	while(1) {
-		timespec.tv_nsec = rand()%1001;
+		timespec.tv_nsec = 20000000 + rand()%1001;
 		nanosleep(&timespec, NULL);
 		printf("proc3: event_set.\n");
 		eid = event_set(event);
@@ -77,19 +77,19 @@ void proc3(char *event)
 			while(1) { perror("proc3: event_set"); }
 		}
 		event_check_error_exit(rt, "proc3: event_set\n");
-		timespec.tv_nsec = rand()%1001;
+		timespec.tv_nsec = 20000000 + rand()%1001;
 		nanosleep(&timespec, NULL);
-		printf("proc3: event_wait\n");
+		printf("proc3: event_wait.\n");
 		rt = event_wait(eid);
 		event_check_error_exit(rt, "proc3: event_wait\n");
 		timespec.tv_nsec = rand()%1001;
 		nanosleep(&timespec, NULL);
-		printf("proc3: event_throw\n");
+		printf("proc3: event_throw.\n");
 		rt = event_throw(eid);
 		event_check_error_exit(rt, "proc3: event_throw\n");
-		timespec.tv_nsec = rand()%1001;
+		timespec.tv_nsec = 20000000 + rand()%1001;
 		nanosleep(&timespec, NULL);
-		printf("proc3: event_unset\n");
+		printf("proc3: event_unset.\n");
 		rt = event_unset(eid);
 		if (rt) {
 			while(1) {

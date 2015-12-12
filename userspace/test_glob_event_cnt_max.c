@@ -15,19 +15,19 @@
 
 int main(void)
 {
-	int rt, i;
+	int rt, i, e[8];
 	char *events[] = {"1\0", "2\0", "3\0", "4\0", "5\0", "6\0", "7\0", "8\0"};
 	for (i = 1; i < 8; i++) {
 		printf("proc1 - event_set.\n");
-		rt = event_set(events[i - 1]);
-		event_check_error(rt, "proc1 - event_set");
-		if (rt)
+		e[i-1] = event_set(events[i - 1]);
+		event_check_error(e[i-1], "proc1 - event_set");
+		if (e[i-1])
 			break;
 	}
 	printf("proc1 stoped at %dth event\n", i - 1);
 	for (int temp = 1; temp < 8; temp++) {
 		printf("proc1 - event_unset.\n");
-		rt = event_unset(events[temp - 1]);
+		rt = event_unset(e[temp - 1]);
 		event_check_error_exit(rt, "proc1 - event_unset");
 	}
 	return 0;

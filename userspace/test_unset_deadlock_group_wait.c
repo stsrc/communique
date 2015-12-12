@@ -13,7 +13,7 @@
 void print_test_scenario()
 {
 	printf("\nTest scenario:\n\n");
-	printf("All 3 processes sets 4 events - a, b, c, d\n");
+	printf("All 3 processes set 4 events - a, b, c, d\n");
 	printf("proc1 waits for on of the four events: a, b, c, d\n");
 	printf("proc2 waits for on of the three events: a, b, d\n");
 	printf("proc3 tries to unset event c, what is causing deadlock detection\n");
@@ -27,7 +27,7 @@ void print_test_scenario()
 void proc1(char **events)
 {
 	int rt, e0, e1, e2, e3;
-	printf("proc1: event_set(e0-e3)\n");
+	printf("proc1: event_set(e0-e3).\n");
 	e0 = event_set(events[0]);
 	event_check_error_exit(e0, "proc1: event_set");
 	e1 = event_set(events[1]);
@@ -40,7 +40,7 @@ void proc1(char **events)
 	printf("proc1: event_wait_group - events[0], events[1], events[2], events[3].\n");
 	rt = event_wait_group(events, 4);
 	event_check_error_exit(rt, "proc2: event_wait FAILED - SHOULD NOT FAIL!");
-	printf("proc1: event_unset(e0-e3)\n");
+	printf("proc1: event_unset(e0-e3).\n");
 	rt = event_unset(e0);
 	event_check_error(rt, "proc1: event_unset event0");
 	rt = event_unset(e1);
@@ -58,7 +58,7 @@ void proc2(char **events)
 {
 	int rt, e0, e1, e2, e3;
 	char *events_2[] = {events[0], events[1], events[3]};
-	printf("proc2: event_set(e0-e3)\n");
+	printf("proc2: event_set(e0-e3).\n");
 	e0 = event_set(events[0]);
 	event_check_error_exit(e0, "proc2: event_set");
 	e1 = event_set(events[1]);
@@ -70,7 +70,7 @@ void proc2(char **events)
 	printf("proc2: event_wait_group - events[0], events[1], events[3].\n");
 	rt = event_wait_group(events_2, 3);
 	event_check_error_exit(rt, "proc2: event_wait_group. SHOULD NOT FAIL");
-	printf("proc2: event_unset(e0-e3)\n");
+	printf("proc2: event_unset(e0-e3).\n");
 	rt = event_unset(e0);
 	event_check_error_exit(rt, "proc2: event_unset");
 	rt = event_unset(e1);
@@ -86,7 +86,7 @@ void proc2(char **events)
 void proc3(char **events)
 {
 	int rt, e0, e1, e2, e3;
-	printf("proc3: event_set(e0-e3)\n");
+	printf("proc3: event_set(e0-e3).\n");
 	e0 = event_set(events[0]);
 	event_check_error_exit(e0, "proc3: event_set");
 	e1 = event_set(events[1]);
@@ -95,7 +95,7 @@ void proc3(char **events)
 	event_check_error_exit(e2, "proc3: event_set");
 	e3 = event_set(events[3]);
 	event_check_error_exit(e3, "proc3: event_set");	
-	sleep(5); //assurance of waiting proc1
+	sleep(3);
 	printf("proc3: event_unset - events[2]. Should fail.\n");
 	rt = event_unset(e2);
 	event_check_error(rt, "proc3: event_unset. Positive fail");
