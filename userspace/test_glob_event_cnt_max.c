@@ -16,9 +16,10 @@
 void print_test_scenario()
 {
 	printf("\nTest scenario:\n\n1 process tries to make to many events.\n");
-	printf("Number of events is limited by glob_event_cnt_max variable.\n");
-	printf("Module parameters are default - no need to set values in tim");
-	printf("e of module insertion\n\n");
+	printf("Number of events is limited by glob_event_cnt_max variable.\n\n");
+	printf("Module parameters:\nglob_name_size = 5;\n"
+	       "glob_event_cnt_max = 5;\nglob_compl_cnt_max = 5;\n"
+	       "glob_proc = 5;\n\n");
 	printf("Press enter to start.\n");
 	getchar();
 }

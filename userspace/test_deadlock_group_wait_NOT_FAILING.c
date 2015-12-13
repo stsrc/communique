@@ -49,6 +49,7 @@ void proc1(char **events)
 	event_check_error_exit(rt, "proc1: event_unset event2");
 	rt = event_unset(e3);
 	event_check_error_exit(rt, "proc1: event_unset event3");
+	sleep(1);
 	printf("proc1 exits.\n");
 	exit(0);
 }
@@ -96,7 +97,7 @@ void proc3(char **events)
 	event_check_error_exit(e2, "proc3: event_set");
 	e3 = event_set(events[3]);
 	event_check_error_exit(e3, "proc3: event_set");	
-	sleep(5); //assurance of waiting proc1
+	sleep(4); //assurance of waiting proc1
 	printf("proc3: event_throw: %s\n", events[2]);
 	rt = event_throw(e2);
 	event_check_error_exit(rt, "proc3: event_throw");

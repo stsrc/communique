@@ -16,6 +16,7 @@
  */
 void print_test_scenario()
 {
+	printf("\nModule needs to be reinserted with different parameters!\n");
 	printf("\nTest scenario:\n\n");
 	printf("Creating group completions over the limit of glob_compl_cnt_max"
 	       " variable.\nModule parameters:\nglob_name_size = 5;\n"
@@ -27,109 +28,105 @@ void print_test_scenario()
 void proc1(char **events)
 {
 	int rt, e0, e1;
-	printf("proc1 - event_set\n");
+	printf("proc1 - event_set(a,b)\n");
 	e0 = event_set(events[0]);
 	e1 = event_set(events[1]);
 	event_check_error_exit(e0, "proc1 - event_set");
 	event_check_error_exit(e1, "proc1 - event_set");
 	sleep(5);
-	printf("proc1 - event_throw\n");
+	printf("proc1 - event_throw(a)\n");
 	rt = event_throw(e0);
 	event_check_error_exit(rt, "proc1 - event_throw");
-	printf("proc1 - event_unset.\n");
+	printf("proc1 - event_unset(a, b)\n");
 	rt = event_unset(e1);
 	event_check_error_exit(rt, "proc1 - event_unset");
-	printf("proc1 - event_unset.\n");
 	rt = event_unset(e0);
 	event_check_error_exit(rt, "proc1 - event_unset");
 	sleep(1);
-	printf("proc1 - exits.\n");
+	printf("proc1 - exits\n");
 	exit(0);
 }
 
 void proc2(char **events)
 {
 	int rt, e0, e1;
-	printf("proc2 - event_set\n");
+	printf("proc2 - event_set(a, b)\n");
 	e0 = event_set(events[0]);
 	e1 = event_set(events[1]);
 	event_check_error_exit(e0, "proc2 - event_set");
 	event_check_error_exit(e1, "proc2 - event_set");
-	printf("proc2 - event_wait_group.\n");
+	printf("proc2 - event_wait_group\n");
 	rt = event_wait_group(events, 2);
 	event_check_error_exit(rt, "proc2 - event_wait_group");
-	printf("proc2 - event_unset.\n");
+	printf("proc2 - event_unset(a, b)\n");
 	rt = event_unset(e1);
 	event_check_error_exit(rt, "proc2 - event_unset");
-	printf("proc2 - event_unset.\n");
 	rt = event_unset(e0);
 	event_check_error_exit(rt, "proc2 - event_unset");
-	printf("proc2 - exits.\n");
+	printf("proc2 - exits\n");
 	exit(0);
 }
 
 void proc3(char **events)
 {
 	int rt, e0, e1;
-	printf("proc3 - event_set\n");
+	printf("proc3 - event_set(a, b)\n");
 	e0 = event_set(events[0]);
 	e1 = event_set(events[1]);
 	event_check_error_exit(e0, "proc3 - event_set");
 	event_check_error_exit(e1, "proc3 - event_set");
-	printf("proc3 - event_wait_group.\n");
+	printf("proc3 - event_wait_group\n");
 	rt = event_wait_group(events, 2);
 	event_check_error_exit(rt, "proc3 - event_wait_group");
-	printf("proc3 - event_unset.\n");
+	printf("proc3 - event_unset(a, b)\n");
 	rt = event_unset(e1);
 	event_check_error_exit(rt, "proc3 - event_unset");
-	printf("proc3 - event_unset.\n");
 	rt = event_unset(e0);
 	event_check_error_exit(rt, "proc3 - event_unset");
-	printf("proc3 - exits.\n");
+	printf("proc3 - exits\n");
 	exit(0);
 }
 
 void proc4(char **events)
 {
 	int rt, e0, e1;
-	printf("proc4 - event_set\n");
+	printf("proc4 - event_set(a, b)\n");
 	e0 = event_set(events[0]);
 	e1 = event_set(events[1]);
 	event_check_error_exit(e0, "proc3 - event_set");
 	event_check_error_exit(e1, "proc3 - event_set");
-	printf("proc4 - event_wait_group.\n");
+	printf("proc4 - event_wait_group\n");
 	rt = event_wait_group(events, 2);
 	event_check_error_exit(rt, "proc4 - event_wait_group");
-	printf("proc4 - event_unset.\n");
+	printf("proc4 - event_unset(a, b)\n");
 	rt = event_unset(e1);
 	event_check_error_exit(rt, "proc4 - event_unset");
-	printf("proc4 - event_unset.\n");
 	rt = event_unset(e0);
 	event_check_error_exit(rt, "proc4 - event_unset");
-	printf("proc4 - exits.\n");
+	printf("proc4 - exits\n");
 	exit(0);
 }
 
 void proc5(char **events)
 {
 	int rt, e0, e1;
-	printf("proc3 - event_set\n");
+	printf("proc3 - event_set(a, b)\n");
 	e0 = event_set(events[0]);
 	e1 = event_set(events[1]);
 	event_check_error_exit(e0, "proc3 - event_set");
 	event_check_error_exit(e1, "proc3 - event_set");
 	sleep(1);
-	printf("proc5 - event_wait_group. SHOULD FAIL\n");
+	printf("proc5 - event_wait_group. Should fail\n");
 	rt = event_wait_group(events, 2);
-	event_check_error_exit(rt, "proc5 - event_wait_group, positive fail, proc5 exits");
+	event_check_error(rt, "proc5 - event_wait_group, positive fail.");
 	if (!rt)
 		printf("proc5 - have not failed!\n");
-	printf("proc5 - event_unset.\n");
+	printf("proc5 - event_unset(a, b)\n");
 	rt = event_unset(e1);
 	event_check_error_exit(rt, "proc5 - event_unset");
 	rt = event_unset(e0);
 	event_check_error_exit(rt, "proc5 - event_unset");
-	printf("proc5 - exits.\n");
+	printf("proc5 - exits\n");
 	exit(0);
 }
 

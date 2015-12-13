@@ -20,18 +20,18 @@ void print_test_scenario()
 void proc2(char **events)
 {
 	int rt, e0, e1;
-	printf("proc2 - event_set\n");
+	printf("proc2 - event_set(a and b)\n");
 	e1 = event_set(events[1]);
 	event_check_error_exit(e1, "proc2 - event_set");
 	e0 = event_set(events[0]);
 	event_check_error_exit(e0, "proc2 - event_set");
-	printf("proc2 - event_wait\n");
+	printf("proc2 - event_wait(a)\n");
 	rt = event_wait(e0);
 	event_check_error_exit(rt, "proc2 - event_wait");
-	printf("proc2 - event_throw\n");
+	printf("proc2 - event_throw(b)\n");
 	rt = event_throw(e1);
 	event_check_error_exit(rt, "proc2 - event_throw");
-	printf("proc2 - event_unset\n");
+	printf("proc2 - event_unset(a and b)\n");
 	rt = event_unset(e1);
 	event_check_error_exit(rt, "proc2 - event_unset");
 	rt = event_unset(e0);
@@ -43,15 +43,15 @@ void proc2(char **events)
 void proc3(char **events)
 {
 	int rt, e1, e2;
-	printf("proc3 - event_set\n");
+	printf("proc3 - event_set(b and c)\n");
 	e2 = event_set(events[2]);
 	event_check_error_exit(e2, "proc3 - event_set");
 	e1 = event_set(events[1]);
 	event_check_error_exit(e1, "proc3 - event_set");
-	printf("proc3 - event_wait\n");
+	printf("proc3 - event_wait(b)\n");
 	rt = event_wait(e1);
 	event_check_error_exit(rt, "proc3 - event_wait");
-	printf("proc3 - event_unset\n");
+	printf("proc3 - event_unset(b and c)\n");
 	rt = event_unset(e2);
 	event_check_error_exit(rt, "proc3 - event_unset");
 	rt = event_unset(e1);
@@ -63,14 +63,14 @@ void proc3(char **events)
 void proc4(char **events)
 {
 	int rt, e2;
-	printf("proc4 - event_set\n");
+	printf("proc4 - event_set(a)\n");
 	e2 = event_set(events[2]);
 	event_check_error_exit(e2, "proc4 - event_set");
 	sleep(3);
-	printf("proc4 - event_throw\n");
+	printf("proc4 - event_throw(a)\n");
 	rt = event_throw(e2);
 	event_check_error_exit(rt, "proc4 - event_throw");
-	printf("proc4 - event_unset\n");
+	printf("proc4 - event_unset(a)\n");
 	rt = event_unset(e2);
 	event_check_error_exit(rt, "proc4 - event_unset");
 	printf("proc4 - exits\n");
@@ -110,19 +110,19 @@ int main(void)
 	default:
 		break;
 	}
-	printf("proc1 - event_set\n");
+	printf("proc1 - event_set(a and c)\n");
 	e0 = event_set(events[0]);
 	event_check_error_exit(e0, "proc1 - event_set");
 	e2 = event_set(events[2]);
 	event_check_error_exit(e2, "proc1 - event_set");
 	sleep(5);
-	printf("proc1 - event_wait\n");
+	printf("proc1 - event_wait(c)\n");
 	rt = event_wait(e2);
 	event_check_error_exit(rt, "proc1 - event_wait");
-	printf("proc1 - event_throw\n");
+	printf("proc1 - event_throw(a)\n");
 	rt = event_throw(e0);
 	event_check_error_exit(rt, "proc1 - event_throw");
-	printf("proc1 - event_unset\n");
+	printf("proc1 - event_unset(a and c)\n");
 	rt = event_unset(e0);
 	event_check_error_exit(rt, "proc1 - event_unset");	
 	rt = event_unset(e2);

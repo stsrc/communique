@@ -113,7 +113,22 @@ int events_release(struct inode *inode, struct file *file)
 	struct event *event = NULL;
 	if (unlikely(file->private_data != NULL)) {
 		event = (struct event *)file->private_data;
+		file->private_data = NULL;
+		mutex_lock(&cmc.lock);
 		events_remove_task(event->proc_throws, glob_proc, current);
+		if (event->s_comp)
+			complete_all(event->wait[0]);
+		if (event->g_comp) {
+			for(unsigned int i = 1; i < glob_compl_cnt_max; i++) {
+				if (event->wait[i] != NULL) {
+					if (completion_done(event->wait[i]))
+						continue;
+					complete_all(event->wait[i]);
+					event->completed_by[i] = event->name;
+				}
+			}
+		}
+		mutex_unlock(&cmc.lock);
 	}
 	return 0;
 }
@@ -438,8 +453,15 @@ int events_set(struct file *file, struct events *cmc, const char __user *buf)
 	event = events_search(cmc, name);
 	if (event != NULL) {
 		rt = events_add_task(event->proc_throws, glob_proc, current);
-		if (rt == -EINVAL)
-			rt = 0;		
+		if (rt == -EINVAL) {
+			rt = 0;	
+		} else if (rt == -ENOMEM) {
+			cmc->event_cnt++;
+			goto no_mem;
+		}
+		kfree(name);
+		cmc->kmalloc_cnt--;
+		name = NULL;	
 	} else {
 		cmc->event_cnt++;
 		if (cmc->event_cnt > glob_event_cnt_max)

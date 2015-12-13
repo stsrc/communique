@@ -13,8 +13,10 @@ void print_test_scenario()
 {
 	printf("\nTest scenario:\n\n");
 	printf("Process 1 throws one of four events\n");
-	printf("Porcess 2 waits on group_wait - waits for one of four events\n");
-	printf("Process 2 knows on which event it was awaken\n\n");
+	printf("Process 2 waits on group_wait - waits for one of four events\n");
+	printf("Process 2 gets information by which event it was awaken\n\n");
+	printf("To start press Enter.\n");
+	getchar();
 }
 
 void proc2()
@@ -67,6 +69,7 @@ int main(void)
 	int rt, e0, e1, e2, e3;
 	int tab[4];
 	pid_t pid;
+	print_test_scenario();
 	pid = fork();
 	switch(pid) {
 	case 0:

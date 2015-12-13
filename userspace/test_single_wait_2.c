@@ -12,6 +12,8 @@ void print_test_scenario()
 	printf("\nTest scenario:\n\n");
 	printf("proc1 throws event\n");
 	printf("proc2 and proc3 waits for event\n\n");
+	printf("To start press Enter.\n");
+	getchar();
 }
 void proc1(char *event)
 {
@@ -50,6 +52,7 @@ void proc2(char *event)
 	int e0 = event_set(event);
 	event_check_error_exit(e0, "proc2 - event_set");
 	while(cnt < 4) {
+		sleep(1);
 		printf("proc2 - event_wait(a)\n");
 		rt = event_wait(e0);
 		event_check_error(rt, "proc2 - event_wait");
@@ -71,6 +74,7 @@ void proc3(char *event)
         e0 = event_set(event);
 	event_check_error_exit(e0, "proc3 - event_set");
 	while (cnt < 4) {
+		sleep(1);
 		printf("proc3 - event_wait(a)\n");
 		rt = event_wait(e0);
 		event_check_error(rt, "proc3 - event_wait\n");

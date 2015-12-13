@@ -15,7 +15,9 @@ void print_test_scenario()
 	printf("\nTest scenario:\n\n");
 	printf("Thread 1 throws one of four events\n");
 	printf("Thread 2 waits on group_wait - waits for one of four events\n");
-	printf("Thread 2 knows on which event it was awaken\n\n");
+	printf("Thread 2 gets information on which event it was awaken\n\n");
+	printf("To start press Enter.\n");
+	getchar();
 }
 
 void *thr2()
@@ -68,6 +70,7 @@ int main(void)
 	int rt, e0, e1, e2, e3;
 	int tab[4];
 	pthread_t thread_2;
+	print_test_scenario();
 	rt = pthread_create(&thread_2, NULL, thr2, (void *)NULL);
 	printf("thread 1: event_set\n");
 	e0 = event_set(eventa);

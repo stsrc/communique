@@ -16,13 +16,25 @@
  *	glob_proc = 3;
  */
 
+void print_test_scenario()
+{
+	printf("\nModule needs to be reinserted with different parameters!\n");
+	printf("\nTest scenario:\n\n");
+	printf("Creating to many processes for one event.\n"
+	       "Module parameters:\nglob_name_size = 5;\n"
+	       "glob_event_cnt_max = 5;\nglob_compl_cnt_max = 5;\n"
+	       "glob_proc = 3;\n\n");
+	printf("Press enter to start.\n");
+	getchar();	
+}
+
 void proc1(char *event)
 {
 	int rt, e0;
 	printf("proc1 - event_set.\n");
 	e0 = event_set(event);
 	event_check_error_exit(e0, "proc1 - event_set");
-	sleep(5);
+	sleep(3);
 	printf("proc1 - event_throw.\n");
 	rt = event_throw(e0);
 	event_check_error_exit(rt, "proc1 - event_throw");
@@ -81,6 +93,7 @@ int main(void)
 {
 	char event[2] = "a\0";
 	pid_t pid;
+	print_test_scenario();
 	pid = fork();
 	switch(pid) {
 	case 0:

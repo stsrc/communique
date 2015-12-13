@@ -14,10 +14,22 @@
  *	glob_proc = 5;
  */
 
+void print_test_scenario()
+{
+	printf("\nTest scenario:\n\n");
+	printf("Creating event with to long name.\n"
+	       "Module parameters:\nglob_name_size = 5;\n"
+	       "glob_event_cnt_max = 5;\nglob_compl_cnt_max = 5;\n"
+	       "glob_proc = 5;\n\n");
+	printf("Press enter to start.\n");
+	getchar();	
+}
+
 int main(void)
 {
 	int e0;
 	char *event = "-------------------------------\0";
+	print_test_scenario();
 	printf("proc1: event_set. Should fail.\n");
 	e0 = event_set(event);
 	event_check_error_exit(e0, "proc1: event_set. Positive fail");
