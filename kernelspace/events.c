@@ -425,6 +425,8 @@ int events_set(struct file *file, struct events *cmc, const char __user *buf)
 {
 	int rt;
 	struct event *event;
+	if (file->private_data != NULL)
+		return -EINVAL;
 	rt = mutex_lock_interruptible(&cmc->lock);
 	if (rt)
 		return -EINTR;
@@ -437,20 +439,16 @@ int events_set(struct file *file, struct events *cmc, const char __user *buf)
 	if (event != NULL) {
 		rt = events_add_task(event->proc_throws, glob_proc, current);
 		if (rt == -EINVAL)
-			rt = 0;
-		file->private_data = (void *)event;
-		mutex_unlock(&cmc->lock);
-		kfree(name);
-		cmc->kmalloc_cnt--;
-		return rt;
-	}
-	cmc->event_cnt++;
-	if (cmc->event_cnt > glob_event_cnt_max)
-		goto no_mem;
-	event = events_init_event(name);
-	if (event == NULL)
-		goto no_mem;
-	list_add(&event->element, &cmc->event_list);
+			rt = 0;		
+	} else {
+		cmc->event_cnt++;
+		if (cmc->event_cnt > glob_event_cnt_max)
+			goto no_mem;
+		event = events_init_event(name);
+		if (event == NULL)
+			goto no_mem;
+		list_add(&event->element, &cmc->event_list);
+	}	
 	file->private_data = (void *)event;
 	mutex_unlock(&cmc->lock);
 	return 0;
@@ -516,8 +514,8 @@ int events_wait(struct file *file, struct events *cmc)
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
-	completion_done(event->wait[0]);
-	reinit_completion(event->wait[0]);
+	if (completion_done(event->wait[0]))
+		reinit_completion(event->wait[0]);
 	event->s_comp++;
 	rt = events_add_task(event->proc_waits, glob_proc, current);
 	if (rt) {
@@ -705,8 +703,7 @@ int events_insert_group(struct events *cmc, struct events_group *gr)
 	return 0;
 }
 
-int events_group_wait(struct file *file, struct events *cmc, 
-		      const char __user *user_buf)
+int events_group_wait(struct events *cmc, const char __user *user_buf)
 {
 	struct events_group events_group;
 	int rt;
@@ -787,7 +784,7 @@ long events_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case WAITFOREVENT:
 		return events_wait(file, &cmc);
 	case WEITINGROUP:
-		return events_group_wait(file, &cmc, (char __user *)arg);
+		return events_group_wait(&cmc, (char __user *)arg);
 	case THROWEVENT:
 		return events_throw(file, &cmc);
 	case UNSETEVENT:
