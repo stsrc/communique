@@ -1,0 +1,7 @@
+#! /bin/bash
+set -e
+clear
+make
+sudo rmmod events.ko
+sudo insmod events.ko
+sudo chmod a+rw /dev/events

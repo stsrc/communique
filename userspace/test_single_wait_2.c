@@ -39,8 +39,8 @@ void proc1(char *event)
 		rt = event_unset(e0);
 		event_check_error(rt, "proc1 - event_unset");
 	}
-	printf("proc1 - exits.\n");
 	sleep(1);
+	printf("proc1 - exits.\n");
 	exit(0);
 }
 

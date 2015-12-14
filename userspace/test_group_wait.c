@@ -106,6 +106,7 @@ int main(void)
 		event_check_error(rt, "proc1: event_unset event2");
 		rt = event_unset(e3);
 		event_check_error(rt, "proc1: event_unset event3");
+		sleep(1);
 		printf("proc1: returning\n");
 		exit(0);
 	}
