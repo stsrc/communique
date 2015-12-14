@@ -19,6 +19,7 @@
 #include <linux/sched.h>
 #include <asm/io.h>
 #include <linux/moduleparam.h>
+#include <asm/delay.h>
 
 MODULE_LICENSE("GPL");
 
@@ -317,6 +318,7 @@ static inline int events_unset_check(struct events *cmc, struct event *event)
 		rt = events_unset_check_deadlock(cmc, event);
 		if (rt == -EAGAIN) {
 			mutex_unlock(&cmc->lock);
+			udelay(2);
 			mutex_lock(&cmc->lock);
 		}
 	}
@@ -536,10 +538,8 @@ int events_wait(struct file *file, struct events *cmc)
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
-	if (completion_done(event->wait[0])) {
-		if (completion_done(event->wait[0]))
-			reinit_completion(event->wait[0]);
-	}
+	if (completion_done(event->wait[0]))
+		reinit_completion(event->wait[0]);
 	event->s_comp++;
 	rt = events_add_task(event->proc_waits, glob_proc, current);
 	if (rt) {
@@ -556,9 +556,9 @@ int events_wait(struct file *file, struct events *cmc)
 	}
 	mutex_unlock(&cmc->lock);
 	rt = wait_for_completion_interruptible(event->wait[0]);
+	mutex_lock(&cmc->lock);
 	if (rt)
 		rt = -EINTR;
-	mutex_lock(&cmc->lock);
 	if (!event->s_comp) {
 		debug_message();
 		generate_oops();
@@ -836,7 +836,6 @@ static struct events cmc = {
 static int __init events_init(void)
 {
 	int rt;
-	debug_message();
 	mutex_init(&cmc.lock);
 	rt = alloc_chrdev_region(&cmc.dev, 0, 1, cmc.driver_name);
 	if (rt)
@@ -909,7 +908,6 @@ void events_remove_at_exit(struct events *cmc, struct event *event)
 static void __exit events_exit(void)
 {
 	struct event *event = NULL, *temp = NULL;
-	debug_message();
 	device_destroy(cmc.class, cmc.dev);
 	cdev_del(cmc.cdev);
 	class_destroy(cmc.class);
