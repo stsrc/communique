@@ -302,7 +302,7 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 		rt = events_unset_check_if_rest_wait(cmc, event->proc_throws);
 		if (rt)
 			return -EDEADLK;
-		return -EAGAIN;
+		//return -EAGAIN;
 	}
 	return 0;
 }
@@ -313,15 +313,16 @@ static inline int events_unset_check(struct events *cmc, struct event *event)
 	rt = events_search_task(event->proc_throws, glob_proc, current);
 	if (rt == -1)
 		return -EACCES;
-	rt = -EAGAIN;
-	while(rt == -EAGAIN) {
+	do {
 		rt = events_unset_check_deadlock(cmc, event);
 		if (rt == -EAGAIN) {
 			mutex_unlock(&cmc->lock);
-			udelay(2);
+			set_current_state(TASK_INTERRUPTIBLE);
+			schedule_timeout(1);
 			mutex_lock(&cmc->lock);
+			printk(KERN_EMERG "testtest\n");
 		}
-	}
+	} while (rt == -EAGAIN);
 	return rt;
 }
 
@@ -537,6 +538,15 @@ int events_wait(struct file *file, struct events *cmc)
 	if (event == NULL) {
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
+	}
+	/*
+	 * without this loop test_single_wait_2 fails.
+	 * schedule() is far more better in this situation than udelay(2);
+	 */
+	while (event->s_comp && completion_done(event->wait[0])) {
+		mutex_unlock(&cmc->lock);
+		schedule();
+		mutex_lock(&cmc->lock);
 	}
 	if (completion_done(event->wait[0]))
 		reinit_completion(event->wait[0]);
