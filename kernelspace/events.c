@@ -320,7 +320,7 @@ static inline int events_unset_check(struct events *cmc, struct event *event)
 			set_current_state(TASK_INTERRUPTIBLE);
 			schedule_timeout(1);
 			mutex_lock(&cmc->lock);
-			printk(KERN_EMERG "testtest\n");
+			debug_message();
 		}
 	} while (rt == -EAGAIN);
 	return rt;
@@ -547,6 +547,7 @@ int events_wait(struct file *file, struct events *cmc)
 		mutex_unlock(&cmc->lock);
 		schedule();
 		mutex_lock(&cmc->lock);
+		debug_message();
 	}
 	if (completion_done(event->wait[0]))
 		reinit_completion(event->wait[0]);
