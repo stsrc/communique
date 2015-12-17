@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <libudev.h>
 #include <asm-generic/ioctl.h>
 
 int event_set(char *name);
