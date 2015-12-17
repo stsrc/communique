@@ -21,7 +21,6 @@ void print_test_scenario()
 	printf("Processes unset events and exit\n\n");
 	printf("Press enter to start\n");
 	getchar();
-	printf("\n");
 }
 
 void proc1(char **events)
@@ -50,7 +49,7 @@ void proc1(char **events)
 	rt = event_unset(e3);
 	event_check_error_exit(rt, "proc1: event_unset event3");
 	printf("proc1: exits.\n");
-	sleep(1);
+	sleep(2);
 	exit(0);
 }
 

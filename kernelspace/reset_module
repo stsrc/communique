@@ -1,7 +1,6 @@
 #! /bin/bash
 set -e
 clear
-make
 sudo rmmod events
 sudo insmod events.ko
 sudo chmod a+rw /dev/events

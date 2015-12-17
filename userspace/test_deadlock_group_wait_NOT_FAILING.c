@@ -49,7 +49,7 @@ void proc1(char **events)
 	event_check_error_exit(rt, "proc1: event_unset event2");
 	rt = event_unset(e3);
 	event_check_error_exit(rt, "proc1: event_unset event3");
-	sleep(1);
+	sleep(2);
 	printf("proc1 exits.\n");
 	exit(0);
 }

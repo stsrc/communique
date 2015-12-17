@@ -75,11 +75,6 @@ struct event *events_check_if_proc_waits(struct events *cmc,
 ssize_t events_remove_task(struct task_struct **arr, ssize_t size,
 			   struct task_struct *task);
 
-static inline void generate_oops(void)
-{
-	*(int *)NULL = 0;
-}
-
 void events_diagnose_event(struct event *event)
 {
 	if (event == NULL) {
@@ -109,14 +104,14 @@ void events_diagnose_event(struct event *event)
 	}
 }
 
+int events_unset(struct file *file, struct events *cmc);
+
 int events_release(struct inode *inode, struct file *file)
 {
 	struct event *event = NULL;
+	mutex_lock(&cmc.lock);
 	if (unlikely(file->private_data != NULL)) {
 		event = (struct event *)file->private_data;
-		file->private_data = NULL;
-		mutex_lock(&cmc.lock);
-		events_remove_task(event->proc_throws, glob_proc, current);
 		if (event->s_comp)
 			complete_all(event->wait[0]);
 		if (event->g_comp) {
@@ -129,6 +124,9 @@ int events_release(struct inode *inode, struct file *file)
 				}
 			}
 		}
+		mutex_unlock(&cmc.lock);
+		events_unset(file, &cmc);
+	} else {
 		mutex_unlock(&cmc.lock);
 	}
 	return 0;
@@ -302,7 +300,6 @@ int events_unset_check_deadlock(struct events *cmc, struct event *event)
 		rt = events_unset_check_if_rest_wait(cmc, event->proc_throws);
 		if (rt)
 			return -EDEADLK;
-		return -EAGAIN;
 	}
 	return 0;
 }
@@ -313,25 +310,31 @@ static inline int events_unset_check(struct events *cmc, struct event *event)
 	rt = events_search_task(event->proc_throws, glob_proc, current);
 	if (rt == -1)
 		return -EACCES;
-	rt = -EAGAIN;
-	while(rt == -EAGAIN) {
+	do {
 		rt = events_unset_check_deadlock(cmc, event);
 		if (rt == -EAGAIN) {
 			mutex_unlock(&cmc->lock);
-			udelay(2);
+			set_current_state(TASK_INTERRUPTIBLE);
+			/*
+			 * process is going to sleep, because in near future
+			 * there will be possibility for event unset.
+			 */
+			schedule_timeout(1);
 			mutex_lock(&cmc->lock);
+			/*
+			 * shows how many times loops is repeated
+			 */
+			debug_message(); 
 		}
-	}
+	} while (rt == -EAGAIN);
 	return rt;
 }
 
 void events_delete_event(struct events *cmc, struct event *event)
 {
 	list_del(&event->element);
-	if (!cmc->event_cnt) {
-		generate_oops();
+	if (!cmc->event_cnt)
 		debug_message();
-	}
 	cmc->event_cnt--;
 	kfree(event->name);
 	cmc->kmalloc_cnt--;
@@ -477,10 +480,8 @@ int events_set(struct file *file, struct events *cmc, const char __user *buf)
 	mutex_unlock(&cmc->lock);
 	return 0;
 no_mem:
-	if (!cmc->event_cnt) {
-		generate_oops();
+	if (!cmc->event_cnt)
 		debug_message();
-	}
 	cmc->event_cnt--;
 	mutex_unlock(&cmc->lock);
 	kfree(name);
@@ -538,6 +539,19 @@ int events_wait(struct file *file, struct events *cmc)
 		mutex_unlock(&cmc->lock);
 		return -EINVAL;
 	}
+	/*
+	 * without this loop test_single_wait_2 fails.
+	 * schedule() is far more better in this situation than udelay(2);
+	 */
+	while (event->s_comp && completion_done(event->wait[0])) {
+		mutex_unlock(&cmc->lock);
+		schedule();
+		mutex_lock(&cmc->lock);
+		/*
+		 * shows how many times loop is repeated
+		 */
+		debug_message();
+	}
 	if (completion_done(event->wait[0]))
 		reinit_completion(event->wait[0]);
 	event->s_comp++;
@@ -559,10 +573,8 @@ int events_wait(struct file *file, struct events *cmc)
 	mutex_lock(&cmc->lock);
 	if (rt)
 		rt = -EINTR;
-	if (!event->s_comp) {
+	if (!event->s_comp)
 		debug_message();
-		generate_oops();
-	}
 	event->s_comp--;
 	events_remove_task(event->proc_waits, glob_proc, current);
 	mutex_unlock(&cmc->lock);
@@ -683,10 +695,8 @@ int events_remove_group(struct events *cmc, struct events_group *gr)
 				completed_by = i + 1;
 			event->completed_by[rt] = NULL;
 		}
-		if (!event->g_comp) {
+		if (!event->g_comp)
 			debug_message();
-			generate_oops();
-		}
 		event->g_comp--;
 	}
 	return completed_by;
@@ -715,10 +725,8 @@ int events_insert_group(struct events *cmc, struct events_group *gr)
 		rt = events_add_compl(event->wait, glob_compl_cnt_max, 
 				      gr->comp);
 		if (rt) {
-			if (!event->g_comp) {
+			if (!event->g_comp)
 				debug_message();
-				generate_oops();
-			}
 			event->g_comp--;
 			events_remove_group(cmc, gr);
 			return -ENOMEM;

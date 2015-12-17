@@ -11,7 +11,7 @@ void print_test_scenario()
 	printf("process 2 - waits for event \"a\".\n");
 	printf("process 3 - sets event \"a\", throws event, waits for "
 	       "event and unsets event in one loop iteration.\n\n");
-	printf("To exit program hit ctrl+c. " 
+	printf("To exit program press CTRL+C. " 
 	       "Driver should still be stable after program termination.\n\n");
 	printf("To start program press enter.\n");
 	getchar();
