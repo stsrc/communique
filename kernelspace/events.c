@@ -915,12 +915,13 @@ void events_remove_at_exit(struct events *cmc, struct event *event)
 
 static void __exit events_exit(void)
 {
+	int rt;
 	struct event *event = NULL, *temp = NULL;
 	device_destroy(cmc.class, cmc.dev);
 	cdev_del(cmc.cdev);
 	class_destroy(cmc.class);
 	unregister_chrdev_region(cmc.dev, 1);
-	mutex_lock_interruptible(&cmc.lock);
+	rt = mutex_lock_interruptible(&cmc.lock);
 	list_for_each_entry_safe(event, temp, &cmc.event_list, element) {
 		events_diagnose_event(event);
 		events_remove_at_exit(&cmc, event);

@@ -63,14 +63,14 @@ void proc3(char **events)
 void proc4(char **events)
 {
 	int rt, e2;
-	printf("proc4 - event_set(a)\n");
+	printf("proc4 - event_set(c)\n");
 	e2 = event_set(events[2]);
 	event_check_error_exit(e2, "proc4 - event_set");
 	sleep(3);
-	printf("proc4 - event_throw(a)\n");
+	printf("proc4 - event_throw(c)\n");
 	rt = event_throw(e2);
 	event_check_error_exit(rt, "proc4 - event_throw");
-	printf("proc4 - event_unset(a)\n");
+	printf("proc4 - event_unset(c)\n");
 	rt = event_unset(e2);
 	event_check_error_exit(rt, "proc4 - event_unset");
 	printf("proc4 - exits\n");
