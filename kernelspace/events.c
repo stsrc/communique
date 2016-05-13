@@ -66,7 +66,6 @@ struct events {
 	struct list_head event_list;
 	struct mutex lock;
 	unsigned int event_cnt;
-	int kmalloc_cnt;
 };
 
 static struct events cmc;
@@ -145,14 +144,12 @@ char *events_get_name(const char __user *buf)
 {
 	int rt;
 	char *name = kmalloc(sizeof(char) * (glob_name_size + 1), GFP_KERNEL);
-	cmc.kmalloc_cnt++;
 	if (unlikely(name == NULL))
 		return NULL;
 	memset(name, 0, sizeof(char)*(glob_name_size + 1));
 	rt = copy_from_user(name, buf, glob_name_size);
 	if (unlikely(rt)) {
 		kfree(name);
-		cmc.kmalloc_cnt--;
 		return NULL;
 	}
 	return name;	
@@ -257,7 +254,6 @@ struct event *events_get_event(struct events *cmc, const char __user *buf)
 		return NULL;
 	event = events_search(cmc, name);
 	kfree(name);
-	cmc->kmalloc_cnt--;
 	return event;
 }
 
@@ -337,25 +333,18 @@ void events_delete_event(struct events *cmc, struct event *event)
 		debug_message();
 	cmc->event_cnt--;
 	kfree(event->name);
-	cmc->kmalloc_cnt--;
 	event->name = NULL;
 	kfree(event->wait[0]);
-	cmc->kmalloc_cnt--;
 	event->wait[0] = NULL;
 	kfree(event->wait);
-	cmc->kmalloc_cnt--;
 	event->wait = NULL;
 	kfree(event->completed_by);
-	cmc->kmalloc_cnt--;
 	event->completed_by = NULL;
 	kfree(event->proc_throws);
-	cmc->kmalloc_cnt--;
 	event->proc_throws = NULL;
 	kfree(event->proc_waits);
-	cmc->kmalloc_cnt--;
 	event->proc_waits = NULL;
 	kfree(event);
-	cmc->kmalloc_cnt--;
 }
 
 int events_unset(struct file *file, struct events *cmc)
@@ -390,36 +379,30 @@ ret:
 static inline struct event* events_init_event(char *name)
 {
 	struct event *event = kmalloc(sizeof(struct event), GFP_KERNEL);
-	cmc.kmalloc_cnt++;
 	if (unlikely(event == NULL))
 		return NULL;
 	memset(event, 0, sizeof(struct event));
 	event->name = name;
 	event->wait = kmalloc(sizeof(struct completion *)*glob_compl_cnt_max,
 			      GFP_KERNEL);
-	cmc.kmalloc_cnt++;
 	if (unlikely(event->wait == NULL))
 		goto err;
 	memset(event->wait, 0, sizeof(struct completion *)*glob_compl_cnt_max);
 	event->proc_throws = kmalloc(sizeof(struct task_struct *)*glob_proc,
 				     GFP_KERNEL);
-	cmc.kmalloc_cnt++;
 	if (unlikely(event->proc_throws == NULL))
 		goto err;
 	memset(event->proc_throws, 0, sizeof(struct task_struct *)*glob_proc);
 	event->proc_waits = kmalloc(sizeof(struct task_struct *)*glob_proc,
 				    GFP_KERNEL);
-	cmc.kmalloc_cnt++;
 	if (unlikely(event->proc_waits == NULL))
 		goto err;
 	memset(event->proc_waits, 0, sizeof(struct task_struct *)*glob_proc);
 	event->wait[0] = kmalloc(sizeof(struct completion), GFP_KERNEL);
-	cmc.kmalloc_cnt++;
 	if (unlikely(event->wait[0] == NULL))
 		goto err;
 	event->completed_by = kmalloc(sizeof(char *)*glob_compl_cnt_max, 
 				      GFP_KERNEL);
-	cmc.kmalloc_cnt++;
 	if (unlikely(event->completed_by == NULL))
 		goto err;
 	memset(event->completed_by, 0, sizeof(char *)*glob_compl_cnt_max);
@@ -429,15 +412,10 @@ static inline struct event* events_init_event(char *name)
 	return event;
 err:
 	kfree(event->wait[0]);
-	cmc.kmalloc_cnt--;
 	kfree(event->wait);
-	cmc.kmalloc_cnt--;
 	kfree(event->proc_throws);
-	cmc.kmalloc_cnt--;
 	kfree(event->proc_waits);
-	cmc.kmalloc_cnt--;
 	kfree(event);
-	cmc.kmalloc_cnt--;
 	return NULL;
 }
 
@@ -465,7 +443,6 @@ int events_set(struct file *file, struct events *cmc, const char __user *buf)
 			goto no_mem;
 		}
 		kfree(name);
-		cmc->kmalloc_cnt--;
 		name = NULL;	
 	} else {
 		cmc->event_cnt++;
@@ -485,7 +462,6 @@ no_mem:
 	cmc->event_cnt--;
 	mutex_unlock(&cmc->lock);
 	kfree(name);
-	cmc->kmalloc_cnt--;
 	return -ENOMEM;
 }
 
@@ -596,13 +572,10 @@ struct events_group {
 void events_del_group_struct(struct events_group *gr)
 {
 	kfree(gr->names);
-	cmc.kmalloc_cnt--;
 	gr->names = NULL;
 	kfree(gr->comp);
-	cmc.kmalloc_cnt--;
 	gr->comp = NULL;
 	kfree(gr->name_tab);
-	cmc.kmalloc_cnt--;
 	gr->name_tab = NULL;
 }
 
@@ -646,13 +619,11 @@ int events_group_get_events(struct events *cmc, struct events_group *events_gr,
 	if (rt)
 		return -EAGAIN;
 	events_gr->names = kmalloc(wait_group.nbytes, GFP_KERNEL);
-	cmc->kmalloc_cnt++;
 	if (events_gr->names == NULL)
 		return -ENOMEM;
 	memset(events_gr->names, 0, wait_group.nbytes);
 	events_gr->name_tab = kmalloc(sizeof(char *)*glob_event_cnt_max, 
 				      GFP_KERNEL);
-	cmc->kmalloc_cnt++;
 	if (events_gr->name_tab == NULL)
 		return -ENOMEM;
 	memset(events_gr->name_tab, 0, sizeof(char *)*glob_event_cnt_max);
@@ -666,7 +637,6 @@ int events_group_get_events(struct events *cmc, struct events_group *events_gr,
 int events_init_completion(struct events_group *gr)
 {
 	gr->comp = kmalloc(sizeof(struct completion), GFP_KERNEL);
-	cmc.kmalloc_cnt++;
 	if (gr->comp == NULL)
 		return -ENOMEM;
 	init_completion(gr->comp);
@@ -838,7 +808,6 @@ static struct events cmc = {
 		},
 	.device = NULL,
 	.event_list = LIST_HEAD_INIT(cmc.event_list),
-	.kmalloc_cnt = 0
 };
 
 static int __init events_init(void)
@@ -889,28 +858,20 @@ void events_remove_at_exit(struct events *cmc, struct event *event)
 {
 	if (!cmc->event_cnt) 
 		debug_message();
-	cmc->event_cnt--;
 	list_del(&event->element);
 	kfree(event->name);
-	cmc->kmalloc_cnt--;
 	event->name = NULL;
 	for (unsigned int i = 0; i < glob_compl_cnt_max; i++) {
 		if (event->wait[i] != NULL) {
 			kfree(event->wait[i]);
-			cmc->kmalloc_cnt--;
 			event->wait[i] = NULL;
 		}
 	}
 	kfree(event->completed_by);
-	cmc->kmalloc_cnt--;
 	kfree(event->wait);
-	cmc->kmalloc_cnt--;
 	kfree(event->proc_throws);
-	cmc->kmalloc_cnt--;
 	kfree(event->proc_waits);
-	cmc->kmalloc_cnt--;
 	kfree(event);
-	cmc->kmalloc_cnt--;
 }
 
 static void __exit events_exit(void)
@@ -925,11 +886,6 @@ static void __exit events_exit(void)
 	list_for_each_entry_safe(event, temp, &cmc.event_list, element) {
 		events_diagnose_event(event);
 		events_remove_at_exit(&cmc, event);
-	}
-	if (cmc.kmalloc_cnt) {
-		printk(KERN_EMERG "WARNING! MEMORY LEAK! "
-		       "cmc.kmalloc_cnt = %d\n", cmc.kmalloc_cnt);
-		debug_message();	
 	}
 	mutex_unlock(&cmc.lock);
 }
